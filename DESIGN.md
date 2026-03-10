@@ -45,6 +45,18 @@ Tasks run until:
 - they exhaust their reduction budget  
 - they terminate  
 
+**t2-lang Example:**
+```t2
+(task my-worker (initial-state cap-log)
+  (:priority :normal)
+  (let (state initial-state)
+    (loop
+      (let (msg (receive))
+        (effect cap-log :info "Got message")
+        (yield)
+        (recur)))))
+```
+
 ### 2.2 Scheduler  
 The scheduler:
 - knows about **every** task.
@@ -67,11 +79,18 @@ Selective receive introduces controlled nondeterminism, but only within the mail
 ## 3.1 Messages  
 Messages are **tagged tuples**:
 
-```
-(:tag arg1 arg2 ...)
+```t2
+'(:tag arg1 arg2 ...)
 ```
 
 They are immutable and pattern‑matchable.
+
+**t2-lang Example:**
+```t2
+;; Construction
+(let (msg '(:user-logged-in "alice" 12345))
+  (send logger-pid msg))
+```
 
 ## 3.2 Mailboxes  
 Each task has a private mailbox:
@@ -80,6 +99,11 @@ Each task has a private mailbox:
 - scanned on `receive`  
 - supports selective receive  
 - supports AGC‑coded warnings for unhandled messages  
+
+**t2-lang Example:**
+```t2
+(send target-pid '(:ping self))
+```
 
 ## 3.3 Selective Receive  
 Selective receive allows a task to:
@@ -90,6 +114,17 @@ Selective receive allows a task to:
 - leave unmatched messages in place  
 
 This is a **core runtime semantic**, not an OTP feature.
+
+**t2-lang Example:**
+```t2
+;; Even if a :low-priority message is first in the mailbox,
+;; this receive block prioritizes finding a :high-priority message.
+(receive
+  ('(:high-priority data) 
+    (process data))
+  ('(:low-priority data) 
+    (process data)))
+```
 
 ## 3.4 Pattern Matching  
 Pattern matching is used in:
@@ -107,9 +142,24 @@ Patterns may include:
 - wildcards  
 - guards  
 
+**t2-lang Example:**
+```t2
+(match msg
+  ('(:ok value) (handle-value value))
+  ('(:error rsn) (handle-error rsn))
+  (_ (log "Unknown message")))
+```
+
 ## 3.5 Capabilities  
 Effects (I/O, timers, shared blobs, etc.) are accessed via **capabilities**.  
 Tasks cannot perform effects without explicit capabilities.
+
+**t2-lang Example:**
+```t2
+(task network-reader (cap-io)
+  (let (data (effect cap-io :read "http://example.com"))
+    (send parent '(:http-result data))))
+```
 
 ## 3.6 Histories  
 Each task maintains:
@@ -238,6 +288,17 @@ Where `POLICY` is one of:
 - `:escalate` - Crash the task (supervisor restarts it).
 - `:block-sender` - (optional) sender yields until space available.
 
+**t2-lang Example:**
+```t2
+(task high-throughput-worker ()
+  (:max-mailbox 5000)
+  (:on-overflow :reject)
+  (loop
+    (let (msg (receive))
+      ;; ...
+      )))
+```
+
 ## 6.2 Selective Receive Algorithm
 
 All messages go through the kernel.
@@ -304,6 +365,24 @@ To maintain a strict Actor model, capabilities are **never** held in a global re
 - sent via messages between tasks.
 
 Tasks cannot perform effects without explicit capabilities.
+
+**t2-lang Example:**
+```t2
+;; The parent task was given log, io, and timer capabilities.
+(task parent (cap-log cap-io cap-timer)
+  
+  ;; It spawns a child, but intentionally restricts it
+  ;; by ONLY passing the timer capability down.
+  (let (child (spawn child-task cap-timer))
+    (send child '(:start))))
+
+(task child-task (cap-timer)
+  (let (msg (receive))
+    (match msg
+      ('(:start) 
+        (effect cap-timer :sleep 1000)
+        (print "I can sleep, but I cannot do network I/O!")))))
+```
 
 ---
 
