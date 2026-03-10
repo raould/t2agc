@@ -1,0 +1,15 @@
+{
+  "name": "t2agc",
+  "version": "0.0.1",
+  "description": "safer concurrency",
+  "license": "CC0-1.0",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
