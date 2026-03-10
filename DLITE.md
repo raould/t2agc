@@ -53,7 +53,7 @@ Dlite builds:
 
 ### 3.1 Message protocol analysis
 
-**Goal:** ensure `send` and `receive` agree on message shapes defined by protocols.
+**Goal:** ensure `send` and `receive` agree on message shapes defined by protocols, including formalized replies.
 
 #### 3.1.1 Protocol collection
 
@@ -62,7 +62,7 @@ From:
 ```t2
 (defprotocol Counter
   (:inc n)
-  (:get from))
+  (:get (from :reply-shape integer)))
 ```
 
 Dlite records:
@@ -70,7 +70,7 @@ Dlite records:
 - protocol name: `Counter`
 - allowed message shapes:
   - `(:inc n)`
-  - `(:get from)`
+  - `(:get from)` where `from` expects an `integer` reply.
 
 #### 3.1.2 Send analysis
 
@@ -168,6 +168,7 @@ For each behavior instance:
   - expected job shapes.
 - **State‑machine**:
   - allowed states and transitions.
+  - requires explicit return macros (e.g., `(transition :idle)`) to allow static mapping of the state graph safely.
 - **Supervisor**:
   - child spec shapes.
 
@@ -181,11 +182,37 @@ Diagnostics:
 
 - `AGC-BEH300` – missing required callback.  
 - `AGC-BEH310` – wrong return shape for behavior callback.  
-- `AGC-BEH320` – behavior declares protocol but never replies.
+- `AGC-BEH320` – behavior declares protocol but never replies, or replies with an incorrect shape.  
+- `AGC-BEH330` – state-machine returns an unregistered state explicitly.
 
 ---
 
-### 3.4 Selective receive and mailbox analysis
+### 3.5 Capability Analysis
+
+**Goal:** statically verify capability limits preventing runtime unauthorized effect usages (I/O, timers).
+
+For every `(effect cap ...)` call, Dlite verifies:
+- `cap` is within the lexical scope of the calling task.
+- `cap` was explicitly bound via:
+  - task creation arguments (e.g., `(spawn timer-server [cap-timer])`).
+  - a received protocol message containing the capability.
+
+Diagnostics:
+- `AGC-CAP500` - unverified capability usage (an effect was attempted, but Dlite could not trace `cap` to a valid injection source).
+- `AGC-CAP510` - passing unregistered capability into `spawn`.
+
+---
+
+### 3.6 Hot-Swap Protocol Compatibility
+
+**Goal:** enforce message compatibility between versioned behaviors, like `chat-room@v1` and `chat-room@v2`.
+
+Dlite uses registry information and namespace versioning to verify:
+- Version 2 is a protocol superset (or exactly identical) to Version 1.
+- All messages defined in V1 are safely handled in V2's `receive` clauses.
+
+Diagnostics:
+- `AGC-PROT230` - breaking protocol change across rolling restart versions (V2 cannot handle all shapes defined in V1).
 
 **Goal:** catch protocol‑level mailbox issues statically.
 
@@ -341,6 +368,8 @@ AGC-PROT200 [Counter] send uses unknown message shape at counter_client.t2:42
 AGC-T120    [Counter] direct field access to opaque type at impl.t2:15
 AGC-BEH300  [MyServer] missing handle-call for (:get ...) at server.t2:10
 AGC-COV410  unknown target pid; cannot check protocol at router.t2:45
+AGC-PROT230 [chat-room@v2] breaking protocol change from chat-room@v1
+AGC-CAP500  unverified capability usage for timer at timer.t2:22
 ```
 
 ### 6.2 Editor integration
