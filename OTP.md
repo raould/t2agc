@@ -70,6 +70,7 @@ Supervisors are tasks that:
 
 - `:id`  
 - `:start` (function or behavior)  
+- `:capabilities` (list of cap tokens the supervisor must possess to pass down)
 - `:restart` (`:permanent | :transient | :temporary`)  
 - `:shutdown` (timeout)  
 - `:type` (`:worker | :supervisor`)  
@@ -214,7 +215,7 @@ All behaviors integrate with:
 
 ## 6.1 Mailbox‑level backpressure
 
-Per‑task options:
+Per‑task options (these configure the underlying **kernel-level** mailbox bounds guarantees):
 
 - `:max-mailbox N`  
 - `:on-overflow :drop-oldest | :drop-newest | :reject | :escalate`  
@@ -333,61 +334,7 @@ Pattern matching sees only the tag, not internals.
 
 # 9. Dialyzer‑Lite (New Section)
 
-A static analysis tool for:
-
-- message protocol checking  
-- behavior callback checking  
-- opaque type usage  
-- unhandled message detection  
-- shape mismatches in `send`  
-- unreachable receive clauses  
-- mailbox starvation patterns  
-
-## 9.1 What it checks
-
-### ✔️ Message protocols  
-If a behavior declares:
-
-```t2
-(defprotocol Counter
-  (:inc n)
-  (:get from))
-```
-
-Dialyzer‑lite checks:
-
-- all sends match protocol  
-- all receives handle protocol  
-- no unexpected messages remain unhandled  
-
-### ✔️ Opaque type usage  
-Ensures:
-
-- only constructors create opaque values  
-- only accessors read internals  
-- pattern matching uses tags, not internals  
-
-### ✔️ Behavior contracts  
-Checks that:
-
-- server callbacks return expected shapes  
-- state‑machine transitions are valid  
-- supervisor child specs are well‑formed  
-
-### ✔️ Selective receive correctness  
-Detects:
-
-- receive clauses that never match  
-- mailbox messages that never get handled  
-- starvation due to selective receive  
-
-## 9.2 Output
-
-Dialyzer‑lite emits:
-
-- warnings with AGC codes  
-- structured reports  
-- optional integration with editor tooling  
+Please refer to `DLITE.md` for full details on Dialyzer-lite and how it performs static analysis for message protocols, capability tracking, behavior checks, and hot-swap compatibility across the ecosystem.
 
 ---
 
