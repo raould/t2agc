@@ -1,0 +1,16 @@
+(program
+  (import (object (Scheduler)) "./scheduler")
+
+  ;; Singleton instance
+  (export (const scheduler (new Scheduler)))
+
+  (export (fn spawn (fnArg args priority)
+     (return ((. scheduler spawn) fnArg args priority))))
+
+  (export (fn run ()
+     ((. scheduler run))))
+
+  (export (fn send (pid msg)
+     ;; Stub for now
+     ((. console log) "Send not implemented yet" pid msg)))
+)

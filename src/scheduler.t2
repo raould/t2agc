@@ -1,0 +1,107 @@
+(program
+  (import (object (Task)) "./tasks")
+
+  (export (class Scheduler
+    (field runQueues)
+    (field tasks)
+    (field pidCounter)
+    (field currentTask)
+    (field yieldReason) ;; Why did the task yield?
+
+    (constructor ()
+      (set (. this tasks) (object)) ;; using object for map
+      ;; runQueues is a object with priority arrays
+      (set (. this runQueues) (object (~high (array)) (~normal (array)) (~low (array))))
+      (set (. this pidCounter) 0)
+      (set (. this currentTask) null)
+      (set (. this yieldReason) null))
+
+    (method spawn (taskFn args priority)
+      ;; 1. Make ID
+      (set (. this pidCounter) (+ (. this pidCounter) 1))
+      (let pid (. this pidCounter))
+
+      ;; 2. Instantiate generator
+      ;; Using apply to spread args: taskFn.apply(null, args)
+      (let gen ((. taskFn apply) null args))
+
+      ;; 3. Create Task
+      (let task (new Task pid gen priority))
+
+      ;; 4. Register
+      (set (index (. this tasks) pid) task)
+
+      ;; 5. Schedule
+      ((. this schedule) task)
+
+      (return pid))
+
+    (method schedule (task)
+       (let queue (index (. this runQueues) (. task priority)))
+       ((. queue push) task))
+
+    ;; Main run loop
+    (method run ()
+      (while true
+        (let task ((. this nextTask)))
+        (if (not task) (break))
+        
+        (set (. this currentTask) task)
+        ((. this executeTask) task)
+        
+        ;; If task finished or crashed, cleanup.
+        ;; If yielded, it's already rescheduled by executeTask (if runnable).
+        
+        (set (. this currentTask) null)))
+
+    (method nextTask ()
+      ;; Check High
+      (let highQ (. (. this runQueues) ~high))
+      (if (> (. highQ length) 0) (return ((. highQ shift))))
+      
+      ;; Check Normal
+      (let normalQ (. (. this runQueues) ~normal))
+      (if (> (. normalQ length) 0) (return ((. normalQ shift))))
+      
+      ;; Check Low
+      (let lowQ (. (. this runQueues) ~low))
+      (if (> (. lowQ length) 0) (return ((. lowQ shift))))
+      
+      (return null))
+
+    (method executeTask (task)
+      ;; Run generator .next()
+      ;; TODO: Pass injected value if waiting for receive
+      (try
+        (let nextVal ((. (. task gen) next))) ;; { done: bool, value: any }
+        
+        (if (. nextVal done)
+            (begin 
+               (set (. task status) ~done)
+               ;; Remove from tasks map? Or keep for inspection?
+               ;; For now keep.
+               (return ~done))
+            (begin
+               ;; Task yielded. Analyze value.
+               ((. this handleYield) task (. nextVal value))
+               (return ~yielded)))
+        (catch e
+           (begin
+             (set (. task status) ~crashed)
+             ;; Log error
+             ((. console error) "Task crashed" (. task id) e)
+             (return ~crashed)))))
+
+    (method handleYield (task yieldVal)
+       ;; If yieldVal is null/undefined, it's a simple cooperative yield.
+       (if (or (=== yieldVal null) (=== yieldVal undefined))
+           (begin
+             ;; Reschedule immediately by pushing to back of queue
+              ((. this schedule) task))
+           (begin
+             ;; Structured yield
+             ;; TODO: Implement :receive, :sleep, etc.
+             ;; For now, just reschedule everything.
+             ((. this schedule) task))))
+  ))
+)
