@@ -1,12 +1,12 @@
 (program
   (export (class Task
-    (field id)
-    (field priority)
-    (field status)    ;; ~runnable, ~waiting, ~done, ~crashed
-    (field gen)       ;; The generator iterator
-    (field mailbox)   ;; Array of messages
-    (field budget)    ;; Reduction budget
-    (field history)   ;; Array of history events
+    (field (id))
+    (field (priority))
+    (field (status))    ;; ~runnable, ~waiting, ~done, ~crashed
+    (field (gen))       ;; The generator iterator
+    (field (mailbox))   ;; Array of messages
+    (field (budget))    ;; Reduction budget
+    (field (history))   ;; Array of history events
 
     (constructor (id gen priority)
       (set (. this id) id)

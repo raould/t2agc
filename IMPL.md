@@ -42,9 +42,9 @@ Implement the `Scheduler` singleton.
 **Internal Pseudocode (t2lang):**
 ```t2
 (class Scheduler
-  (field run-queues { :high [] :normal [] :low [] })
-  (field tasks {})
-  (field pid-counter 0)
+  (field (run-queues) { :high [] :normal [] :low [] })
+  (field (tasks) {})
+  (field (pid-counter) 0)
 
   (method schedule (task)
     (let q (get (. this run-queues) (. task priority)))

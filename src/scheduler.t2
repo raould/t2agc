@@ -2,11 +2,11 @@
   (import (object (Task)) "./tasks")
 
   (export (class Scheduler
-    (field runQueues)
-    (field tasks)
-    (field pidCounter)
-    (field currentTask)
-    (field yieldReason) ;; Why did the task yield?
+    (field (runQueues))
+    (field (tasks))
+    (field (pidCounter))
+    (field (currentTask))
+    (field (yieldReason)) ;; Why did the task yield?
 
     (constructor ()
       (set (. this tasks) (object)) ;; using object for map
