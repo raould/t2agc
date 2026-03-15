@@ -830,21 +830,43 @@ In t2-lang, `receive` is a macro that expands into a mailbox scanning loop:
   (_ 
     (handle_unknown)))
 
+;; Macro Definition:
+(defmacro receive (& clauses)
+  "Selective receive — scan mailbox for first matching pattern.
+   Each clause is (pattern body...). Yields a 'receive' primitive to the
+   scheduler and then dispatches on the matched pattern index."
+  (let patterns
+    (map clauses (lambda (clause)
+      `(object (pattern ~(head clause)) (body (do ~@(tail clause)))))))
+  `(do
+    (let __receive_result
+      (generator_yield
+        (object
+          (type "receive")
+          (patterns (array ~@patterns)))))
+    (match (. __receive_result matched_pattern_index)
+      ~@(map_indexed clauses (lambda (i clause)
+          `(~i (do ~@(tail clause))))))))
+
+;; Example expansion of:
+;;   (receive
+;;     ((array "high_priority" data) (process_high data))
+;;     ((array "low_priority" data)  (process_low data))
+;;     (_ (handle_unknown)))
 ;; Expands to:
-(let __receive_result 
-  (generator_yield 
-    (object
-      (type "receive")
-      (patterns (array
-        (object (pattern (array "high_priority" data)) (body (process_high data)))
-        (object (pattern (array "low_priority" data)) (body (process_low data)))
-        (object (pattern _) (body (handle_unknown))))))))
-;; After scheduler resumes with matched message and bindings:
-(let data (get __receive_result "bindings"))
-(match __receive_result.matched_pattern_index
-  (0 (process_high (get data 'data)))
-  (1 (process_low (get data 'data)))
-  (2 (handle_unknown)))
+;;   (do
+;;     (let __receive_result
+;;       (generator_yield
+;;         (object
+;;           (type "receive")
+;;           (patterns (array
+;;             (object (pattern (array "high_priority" data)) (body (do (process_high data))))
+;;             (object (pattern (array "low_priority" data))  (body (do (process_low data))))
+;;             (object (pattern _)                            (body (do (handle_unknown)))))))))
+;;     (match (. __receive_result matched_pattern_index)
+;;       (0 (do (process_high data)))
+;;       (1 (do (process_low data)))
+;;       (2 (do (handle_unknown)))))
 ```
 
 ### 3.4 Scheduler's Selective Receive Handler
@@ -1741,37 +1763,96 @@ The `task` macro provides syntactic sugar for defining tasks:
 (task.configureMailbox 500 "drop-oldest")
 ```
 
-**Macro Implementation Sketch:**
+**Macro Definition:**
 ```t2
 (defmacro task (name params & options_and_body)
-  "Define a task with options"
+  "Define a task with options.
+   Leading 2-element string-keyed tuples are treated as options;
+   everything after is the task body."
   
-  ;; Parse options (keywords starting with : )
-  (let options (take_while (lambda (form) (starts_with? form ": ")) options_and_body))
+  ;; Options are leading forms of the shape (\"key\" value)
+  (let options
+    (take_while
+      (lambda (form)
+        (and (array? form) (= (length form) 2) (string? (head form))))
+      options_and_body))
   (let body (drop (length options) options_and_body))
   
-  ;; Extract option values
-  (let priority (or (get_option options "priority") "normal"))
+  ;; Extract known option values with defaults
+  (let priority    (or (get_option options "priority")    "normal"))
   (let max_mailbox (or (get_option options "max_mailbox") 1000))
   (let on_overflow (or (get_option options "on_overflow") "drop-oldest"))
+  (let protocol    (get_option options "protocol"))
   
-  ;; Generate function definition
-  `(def ~(symbol (+ (string name) "-fn"))
-     (generator_function ~params
-       ;; Store metadata for spawn helper
-       (do
-         (set! (. (current_generator) __t2-task_options)
-           (object
-             (priority ~priority)
-             (max_mailbox ~max_mailbox)
-             (on_overflow ~on_overflow)))
-         ~@body))))
+  `(def ~(symbol (+ (string name) "_fn"))
+    (generator_function ~params
+      (do
+        (set! (. (current_generator) __t2_task_options)
+          (object
+            (priority    ~priority)
+            (max_mailbox ~max_mailbox)
+            (on_overflow ~on_overflow)
+            (protocol    ~protocol)))
+        ~@body))))
 ```
 
 ### 6.2 `defprotocol` Macro
 
 Defines message protocols at compile time and stores them in a global registry:
 
+```t2
+**Macro Definition:**
+```t2
+(defmacro defprotocol (name & message_specs)
+  "Define a message protocol, register it globally, and generate
+   per-message constructor functions.
+
+   Each message_spec is an array form:
+     (array \"tag\" param* (\"reply_shape\" type)?)
+   where trailing 2-element string-keyed tuples are options."
+  
+  (let proto_name (string name))
+  (let lower_name (string_lower proto_name))
+  
+  ;; Helper that splits a spec into (params, opts)
+  (let parse_spec (lambda (spec)
+    (let raw (drop 2 spec))          ; skip array + tag
+    (let params (filter raw (lambda (p)
+      (not (and (array? p) (= (length p) 2) (string? (head p)))))))
+    (let opts (filter raw (lambda (p)
+      (and (array? p) (= (length p) 2) (string? (head p))))))
+    (object (params params) (opts opts))))
+  
+  (let parsed (map message_specs parse_spec))
+  
+  `(do
+    ;; Register protocol in global registry
+    (map_set! (. __t2agc__ protocols) ~proto_name
+      (object
+        (name ~proto_name)
+        (messages (array
+          ~@(map_indexed message_specs (lambda (i spec)
+              (let tag   (nth spec 1))
+              (let info  (nth parsed i))
+              (let params (. info params))
+              (let opts   (. info opts))
+              (let reply  (get_option opts "reply_shape"))
+              `(object
+                (tag    ~tag)
+                (arity  ~(length params))
+                (params (array ~@(map params (lambda (p) (string p)))))
+                ~@(if reply `((reply_shape ~reply)) (array)))))))))
+    ;; Generate constructor functions: make_<proto>_<tag>(params...)
+    ~@(map_indexed message_specs (lambda (i spec)
+        (let tag    (nth spec 1))
+        (let params (. (nth parsed i) params))
+        (let fn_name
+          (symbol (+ "make_" lower_name "_"
+                     (string_replace tag "-" "_"))))
+        `(defn ~fn_name (~@params) (array ~tag ~@params))))))
+```
+
+**Usage example:**
 ```t2
 ;; User writes:
 (defprotocol Counter
@@ -1781,19 +1862,16 @@ Defines message protocols at compile time and stores them in a global registry:
 
 ;; Expands to:
 (do
-  ;; Store in global protocol registry
-  (map_set! __t2agc__.protocols "Counter"
+  (map_set! (. __t2agc__ protocols) "Counter"
     (object
       (name "Counter")
       (messages (array
-        (object (tag "inc") (arity 1) (params (array "n")))
-        (object (tag "get") (arity 1) (params (array "from")) (reply_shape "integer"))
+        (object (tag "inc")   (arity 1) (params (array "n")))
+        (object (tag "get")   (arity 1) (params (array "from")) (reply_shape "integer"))
         (object (tag "reset") (arity 0) (params (array)))))))
-  
-  ;; Optionally generate helper constructors
-  (defn make_counter_inc (n) (array "inc" n))
-  (defn make_counter_get (from) (array "get" from))
-  (defn make_counter_reset () (array "reset")))
+  (defn make_counter_inc   (n)    (array "inc"   n))
+  (defn make_counter_get   (from) (array "get"   from))
+  (defn make_counter_reset ()     (array "reset")))
 ```
 
 **Runtime Protocol Storage:**
@@ -1816,48 +1894,125 @@ __t2agc__.protocols.set('Counter', {
 Defines opaque types with encapsulation:
 
 ```t2
+**Macro Definition:**
+```t2
+(defmacro defopaque (name & fields)
+  "Define an opaque type with encapsulated fields.
+   Each field spec is (field_name) or (field_name: type).
+   Generates: a private backing class, a constructor make_<name>,
+   per-field accessors <name>_<field>, and a predicate <name>?."
+  
+  (let name_str    (string name))
+  (let lower_name  (string_lower name_str))
+  (let class_name  (symbol (+ "__" name_str)))
+  
+  ;; Extract just the field name symbol from a field spec
+  (let field_name_of (lambda (spec)
+    (if (array? spec) (head spec) spec)))
+  ;; Extract field type (default "any")
+  (let field_type_of (lambda (spec)
+    (if (and (array? spec) (> (length spec) 1)) (nth spec 1) "any")))
+  
+  `(do
+    ;; Private backing class (not exported)
+    (class ~class_name
+      ~@(map fields (lambda (spec)
+          (let fn (field_name_of spec))
+          (let ft (field_type_of spec))
+          `(field (~fn: ~ft))))
+      (field (__opaque_tag: symbol)))
+    
+    ;; Constructor: make_<name>(field...)
+    (defn ~(symbol (+ "make_" lower_name)) (~@(map fields field_name_of))
+      (let __inst (new ~class_name))
+      ~@(map fields (lambda (spec)
+          (let fn (field_name_of spec))
+          `(set! (. __inst ~fn) ~fn)))
+      (set! (. __inst __opaque_tag) (symbol ~name_str))
+      __inst)
+    
+    ;; Per-field accessors: <name>_<field>(instance)
+    ~@(map fields (lambda (spec)
+        (let fn (field_name_of spec))
+        (let accessor (symbol (+ lower_name "_" (string fn))))
+        `(defn ~accessor (instance) (. instance ~fn))))
+    
+    ;; Predicate: <name>?(obj)
+    (defn ~(symbol (+ lower_name "?")) (obj)
+      (and (object? obj)
+           (= (. obj __opaque_tag) (symbol ~name_str))))))
+```
+
+**Usage example:**
+```t2
+;; User writes:
 (defopaque Counter
   (value))
 
 ;; Expands to:
 (do
-  ;; Define backing class
   (class __Counter
-    (field (value: number))
+    (field (value: any))
     (field (__opaque_tag: symbol)))
   
-  ;; Constructor
-  (defn make_counter (value: number)
-    (let instance (new __Counter))
-    (set! (. instance value) value)
-    instance)
+  (defn make_counter (value)
+    (let __inst (new __Counter))
+    (set! (. __inst value) value)
+    (set! (. __inst __opaque_tag) (symbol "Counter"))
+    __inst)
   
-  ;; Accessor
-  (defn counter_value (counter_instance: __Counter)
-    (. counter_instance value))
+  (defn counter_value (instance) (. instance value))
   
-  ;; Pattern match helper (checks tag only)
   (defn counter? (obj)
-    (and (object? obj) 
-         (= (. obj __opaque_tag) (Symbol "Counter")))))
+    (and (object? obj)
+         (= (. obj __opaque_tag) (symbol "Counter")))))
 ```
 
-### 6.4 `spawn` Helper Macro
+### 6.4 `spawn_task` Helper Macro
 
-Simplifies spawning tasks defined with the `task` macro:
+Simplifies spawning tasks defined with the `task` macro by reading the stored `__t2_task_options` metadata:
 
+**Macro Definition:**
+```t2
+(defmacro spawn_task (task_name args)
+  "Spawn a task defined with the `task` macro.
+   Reads the __t2_task_options stored on the generator function at
+   definition time to configure priority and mailbox automatically."
+  (let fn_sym (symbol (+ (string task_name) "_fn")))
+  `(do
+    (let __task_opts (. ~fn_sym __t2_task_options))
+    (let __pid
+      (spawn ~fn_sym ~args
+        (. __task_opts priority)
+        (make_set)))
+    (let __task_inst
+      (map_get (. (get_global_scheduler) tasks) __pid))
+    (. __task_inst
+      (configure_mailbox
+        (. __task_opts max_mailbox)
+        (. __task_opts on_overflow)))
+    __pid))
+```
+
+**Usage example:**
 ```t2
 ;; User writes:
-(spawn_task counter [0 cap_log])
+(spawn_task counter (array 0 cap_log))
 
 ;; Expands to:
-(let task_options (. counter_fn __t2-task_options))
-(let pid (spawn counter_fn [0 cap_log] (. task_options priority) (make_set)))
-(let task_instance (map_get scheduler.tasks pid))
-(task_instance.configureMailbox 
-  (. task_options max_mailbox)
-  (. task_options on_overflow))
-pid
+(do
+  (let __task_opts (. counter_fn __t2_task_options))
+  (let __pid
+    (spawn counter_fn (array 0 cap_log)
+      (. __task_opts priority)
+      (make_set)))
+  (let __task_inst
+    (map_get (. (get_global_scheduler) tasks) __pid))
+  (. __task_inst
+    (configure_mailbox
+      (. __task_opts max_mailbox)
+      (. __task_opts on_overflow)))
+  __pid)
 ```
 
 ## 📅 Stage 7: OTP Basics (t2-agc-otp)
@@ -1959,13 +2114,40 @@ Simple name->pid mapping:
 
 ### 7.3 Behaviors (gen_server equivalent)
 
+The `behavior` macro is a thin wrapper over `task` that attaches a protocol annotation via the `"protocol"` option, which the `task` macro captures into `__t2_task_options.protocol` for Dlite static analysis.
+
 ```t2
 (defmacro behavior (name protocol params & body)
-  "Define a behavior (gen_server style)"
-  
+  "Define a behavior (gen_server style).
+   Equivalent to a task with a 'protocol' option annotation.
+   The protocol name is stored in __t2_task_options for Dlite analysis."
   `(task ~name ~params
      ("protocol" ~protocol)
      ~@body))
+```
+
+**Usage example:**
+```t2
+;; User writes:
+(behavior counter_server Counter (initial_value cap_log)
+  (let state initial_value)
+  (loop
+    (receive
+      ((array "inc" n)   (set! state (+ state n)))
+      ((array "get" from) (send from state)))
+    (yield)
+    (recur)))
+
+;; Expands to:
+(task counter_server (initial_value cap_log)
+  ("protocol" Counter)
+  (let state initial_value)
+  (loop
+    (receive
+      ((array "inc" n)   (set! state (+ state n)))
+      ((array "get" from) (send from state)))
+    (yield)
+    (recur)))
 ```
 
 ### 7.4 Integration with Debugging
