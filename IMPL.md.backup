@@ -24,29 +24,29 @@ The `Task` class represents a single cooperative execution unit. Must include AL
   (field (status:string))    ; "runnable" | "waiting" | "done" | "crashed"
   (field (gen:Generator))    ; Generator function* instance
   (field (budget:number))    ; Reductions remaining in current slice
-  (field (initial_budget:number)) ; Reset value for budget
+  (field (initial-budget:number)) ; Reset value for budget
   
   ;; Mailbox
   (field (mailbox:array))                 ; Array of messages (FIFO)
-  (field (mailbox_max:number))            ; Max mailbox size
-  (field (mailbox_overflow_policy:string)) ; "drop-oldest" | "drop-newest" | "reject" | "escalate" | "block-sender"
-  (field (waiting_patterns:array))        ; Patterns this task is waiting for (when status = "waiting")
+  (field (mailbox-max:number))            ; Max mailbox size
+  (field (mailbox-overflow-policy:string)) ; "drop-oldest" | "drop-newest" | "reject" | "escalate" | "block-sender"
+  (field (waiting-patterns:array))        ; Patterns this task is waiting for (when status = "waiting")
   
   ;; Capabilities & Effects
   (field (capabilities:Set))    ; Set of capability tokens
   
   ;; Histories (Ring Buffers)
-  (field (history_effects:RingBuffer))      ; Last 100 effect events
-  (field (history_exceptional:RingBuffer))  ; Last 50 exceptional events
-  (field (history_critical:RingBuffer))     ; Last 20 critical events
+  (field (history-effects:RingBuffer))      ; Last 100 effect events
+  (field (history-exceptional:RingBuffer))  ; Last 50 exceptional events
+  (field (history-critical:RingBuffer))     ; Last 20 critical events
   
   ;; Statistics (for diagnostics)
-  (field (created_at:number))
-  (field (total_reductions:number))
-  (field (total_messages_sent:number))
-  (field (total_messages_received:number))
-  (field (mailbox_scan_count:number))          ; Number of selective receive scans
-  (field (total_mailbox_scan_operations:number)) ; Total messages scanned
+  (field (created-at:number))
+  (field (total-reductions:number))
+  (field (total-messages-sent:number))
+  (field (total-messages-received:number))
+  (field (mailbox-scan-count:number))          ; Number of selective receive scans
+  (field (total-mailbox-scan-operations:number)) ; Total messages scanned
 )
 ```
 
@@ -149,91 +149,91 @@ class RingBuffer {
 
 #### 1.2.1 Complete Scheduler Structure
 
-The Scheduler manages task lifecycle, priority_based scheduling, and system overload detection.
+The Scheduler manages task lifecycle, priority-based scheduling, and system overload detection.
 
 ```t2
 (class Scheduler
   ;; Priority-based run queues (5 levels as per DESIGN.md)
-  (field (run_queues:object))  ; Map of priority -> array of tasks
+  (field (run-queues:object))  ; Map of priority -> array of tasks
   
   ;; Task registry
   (field (tasks:object))                  ; Map: pid -> Task
-  (field (waiting_tasks:object))          ; Map: pid -> Task (blocked on receive)
-  (field (pid_counter:number))
+  (field (waiting-tasks:object))          ; Map: pid -> Task (blocked on receive)
+  (field (pid-counter:number))
   
   ;; Current execution state
-  (field (current_task:Task))
-  (field (tick_count:number))
+  (field (current-task:Task))
+  (field (tick-count:number))
   (field (running:boolean))
   
   ;; System monitoring (for overload detection)
-  (field (total_run_queue_length:number))
-  (field (avg_slice_duration:number))      ; EMA of slice execution time
-  (field (slice_duration_samples:array))
-  (field (overload_threshold_queue_length:number))
-  (field (overload_threshold_slice_ms:number))
+  (field (total-run-queue-length:number))
+  (field (avg-slice-duration:number))      ; EMA of slice execution time
+  (field (slice-duration-samples:array))
+  (field (overload-threshold-queue-length:number))
+  (field (overload-threshold-slice-ms:number))
   
   ;; Global histories
-  (field (orchestrator_history:RingBuffer))
+  (field (orchestrator-history:RingBuffer))
   
   ;; AGC Code emission
-  (field (agc_codes_emitted:array))
+  (field (agc-codes-emitted:array))
   
   ;; Priority order for scheduling
-  (field (priority_order:array))
+  (field (priority-order:array))
   
   (method schedule (task:Task)
     "Add task to appropriate run queue"
     (let priority (. task priority))
-    (let queue (get (. this run_queues) priority))
-    (array_push queue task)
-    (set! (. this total_run_queue_length) (+ (. this total_run_queue_length) 1)))
+    (let queue (get (. this run-queues) priority))
+    (array-push queue task)
+    (set! (. this total-run-queue-length) (+ (. this total-run-queue-length) 1)))
   
-  (method pick_next_task ()
+  (method pick-next-task ()
     "Select highest priority non-empty queue and dequeue task"
-    (for_each (. this priority_order) (lambda (priority)
-      (let queue (get (. this run_queues) priority))
+    (for-each (. this priority-order) (lambda (priority)
+      (let queue (get (. this run-queues) priority))
       (when (> (length queue) 0)
-        (set! (. this total_run_queue_length) (- (. this total_run_queue_length) 1))
-        (return (array_shift queue)))))
+        (set! (. this total-run-queue-length) (- (. this total-run-queue-length) 1))
+        (return (array-shift queue)))))
     nil)
   
-  (method execute_slice (task:Task)
+  (method execute-slice (task:Task)
     "Execute one slice of a task (up to budget reductions)"
-    (set! (. this current_task) task)
-    (set! (. task budget) (. task initial_budget))
+    (set! (. this current-task) task)
+    (set! (. task budget) (. task initial-budget))
     
-    (let start_time (timestamp))
+    (let start-time (timestamp))
     (let result nil)
     
     (try
       (while (and (> (. task budget) 0) (= (. task status) "runnable"))
-        (set! result (call_generator_next (. task gen)))
+        (set! result (call-generator-next (. task gen)))
         (set! (. task budget) (- (. task budget) 1))
-        (set! (. task total_reductions) (+ (. task total_reductions) 1))
+        (set! (. task total-reductions) (+ (. task total-reductions) 1))
         
         (match result
           ((object (done true) (value _))
             (set! (. task status) "done")
-            (this.on_task_completed task))
+            (this.on-task-completed task))
           
           ((object (done false) (value primitive))
-            (this.handle_primitive task primitive))))
+            (this.handle-primitive task primitive))))
       
       (catch error
-        (this.on_task_crashed task error)))
+        (this.on-task-crashed task error)))
     
     ;; Record slice duration for overload detection
-    (let duration (- (timestamp) start_time))
-    (this.record_slice_duration duration)
+    (let duration (- (timestamp) start-time))
+    (this.record-slice-duration duration)
     
     ;; Re-queue if still runnable
     (when (= (. task status) "runnable")
       (this.schedule task))
     
-    (set! (. this current_task) nil))
+    (set! (. this current-task) nil))
   
-  (method handle_primitive (task:Task primitive:object)
+  (method handle-primitive (task:Task primitive:object)
     "Handle yielded primitives from generator"
     (match primitive
       ((object (type "yield"))
@@ -242,14 +242,14 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
       
       ((object (type "receive") (patterns patterns))
         ;; Selective receive - may block
-        (this.handle_receive task patterns))
+        (this.handle-receive task patterns))
       
       ((object (type "effect") (capability cap) (operation op) (args args))
         ;; Effect dispatch
-        (this.handle_effect task cap op args))
+        (this.handle-effect task cap op args))
       
       (_
-        (this.emit_agc_code "AGC-S999" (concat "Unknown primitive: " primitive))
+        (this.emit-agc-code "AGC-S999" (concat "Unknown primitive: " primitive))
         (set! (. task status) "crashed"))))
   
   (method run ()
@@ -257,51 +257,51 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
     (set! (. this running) true)
     
     (while (. this running)
-      (set! (. this tick_count) (+ (. this tick_count) 1))
+      (set! (. this tick-count) (+ (. this tick-count) 1))
       
       ;; Check for overload
-      (this.check_overload)
+      (this.check-overload)
       
       ;; Pick next task
-      (let task (this.pick_next_task))
+      (let task (this.pick-next-task))
       
       (if task
-        (this.execute_slice task)
+        (this.execute-slice task)
         ;; No tasks - could sleep or exit
-        (if (= (length (keys (. this waiting_tasks))) 0)
+        (if (= (length (keys (. this waiting-tasks))) 0)
           ;; No tasks at all - shut down
           (set! (. this running) false)
           ;; Only waiting tasks - could sleep briefly
           (sleep 1)))))
   
-  (method check_overload ()
+  (method check-overload ()
     "Detect system overload and emit AGC-S100 if needed"
-    (when (> (. this total_run_queue_length) (. this overload_threshold_queue_length))
-      (this.emit_agc_code "AGC-S100" 
-        (concat "Overload: run queue length " (. this total_run_queue_length))))
+    (when (> (. this total-run-queue-length) (. this overload-threshold-queue-length))
+      (this.emit-agc-code "AGC-S100" 
+        (concat "Overload: run queue length " (. this total-run-queue-length))))
     
-    (when (> (. this avg_slice_duration) (. this overload_threshold_slice_ms))
-      (this.emit_agc_code "AGC-S100"
-        (concat "Overload: avg slice duration " (. this avg_slice_duration) "ms"))))
+    (when (> (. this avg-slice-duration) (. this overload-threshold-slice-ms))
+      (this.emit-agc-code "AGC-S100"
+        (concat "Overload: avg slice duration " (. this avg-slice-duration) "ms"))))
   
-  (method record_slice_duration (duration:number)
+  (method record-slice-duration (duration:number)
     "Update EMA of slice duration"
     (let alpha 0.1)
-    (set! (. this avg_slice_duration)
-      (+ (* alpha duration) (* (- 1 alpha) (. this avg_slice_duration)))))
+    (set! (. this avg-slice-duration)
+      (+ (* alpha duration) (* (- 1 alpha) (. this avg-slice-duration)))))
   
-  (method emit_agc_code (code message)
+  (method emit-agc-code (code message)
     "Emit an AGC diagnostic code"
     (let event { 
       timestamp: (timestamp)
       code: code
       message: message
-      task: (if (. this current_task) (. this current_task id) nil)
+      task: (if (. this current-task) (. this current-task id) nil)
     })
-    (array_push (. this agc_codes_emitted) event)
+    (array-push (. this agc-codes-emitted) event)
     (console.error (concat "[" code "] " message))
-    (when (. this current_task)
-      (call (. this current_task recordCritical) code message)))
+    (when (. this current-task)
+      (call (. this current-task recordCritical) code message)))
 )
 ```
 
@@ -344,20 +344,20 @@ class Scheduler {
 #### 1.3.1 `spawn(fn, args, priority, capabilities)`
 
 ```t2
-(defn spawn (generator_fn:function args:array priority:string capabilities:Set)
+(defn spawn (generator-fn:function args:array priority:string capabilities:Set)
   "Create and schedule a new task"
-  (let scheduler (get_global_scheduler))
-  (let pid (scheduler.next_pid))
-  (let task (Task.new pid generator_fn args priority capabilities))
+  (let scheduler (get-global-scheduler))
+  (let pid (scheduler.next-pid))
+  (let task (Task.new pid generator-fn args priority capabilities))
   
   ;; Register task
-  (map_set! (. scheduler tasks) pid task)
+  (map-set! (. scheduler tasks) pid task)
   
   ;; Schedule task
   (scheduler.schedule task)
   
   ;; Record in orchestrator history
-  (ring_buffer_push! (. scheduler orchestrator_history)
+  (ring-buffer-push! (. scheduler orchestrator-history)
     (object
       (type "spawn")
       (timestamp (timestamp))
@@ -393,7 +393,7 @@ function spawn(generatorFn, args = [], priority = 'normal', capabilities = new S
 ```t2
 (defn yield ()
   "Cooperatively yield control back to scheduler"
-  (generator_yield (object (type "yield"))))
+  (generator-yield (object (type "yield"))))
 ```
 
 **In practice, the generator function simply calls JavaScript `yield`.**
@@ -403,7 +403,7 @@ function spawn(generatorFn, args = [], priority = 'normal', capabilities = new S
 ```t2
 (defn run ()
   "Start the scheduler main loop"
-  (let scheduler (get_global_scheduler))
+  (let scheduler (get-global-scheduler))
   (scheduler.run))
 ```
 ```
@@ -418,9 +418,9 @@ function spawn(generatorFn, args = [], priority = 'normal', capabilities = new S
 Each task declares mailbox behavior via options (see Task structure in 1.1.1):
 
 ```t2
-(task high_throughput_worker ()
-  ("max_mailbox" 5000)
-  ("on_overflow" "reject")
+(task high-throughput-worker ()
+  ("max-mailbox" 5000)
+  ("on-overflow" "reject")
   ;; ... body
 )
 ```
@@ -429,95 +429,95 @@ Each task declares mailbox behavior via options (see Task structure in 1.1.1):
 
 1. **`"drop-oldest"`** (default) - Drop the oldest message in the mailbox when full. Safest for most actor systems.
 2. **`"drop-newest"`** - Reject the incoming message when mailbox is full.
-3. **`"reject"`** - Send an error message back to sender: `(array "mailbox_full" target_pid)`
+3. **`"reject"`** - Send an error message back to sender: `(array "mailbox-full" target-pid)`
 4. **`"escalate"`** - Crash the task (supervisor restarts it). Use for critical actors.
 5. **`"block-sender"`** (optional, complex) - Sender yields until space available. (May defer to later stage.)
 
 ### 2.2 `send` Implementation
 
-**Signature:** `(send target_pid msg)`
+**Signature:** `(send target-pid msg)`
 
 **Full Algorithm:**
 
 ```t2
-(defn send (target_pid:number msg:any)
+(defn send (target-pid:number msg:any)
   "Send a message to a task's mailbox"
-  (let scheduler (get_global_scheduler))
-  (let sender (. scheduler current_task))
+  (let scheduler (get-global-scheduler))
+  (let sender (. scheduler current-task))
   
   ;; Look up target task
-  (let target (map_get (. scheduler tasks) target_pid))
+  (let target (map-get (. scheduler tasks) target-pid))
   
   (when (not target)
     ;; Target doesn't exist - emit warning
-    (scheduler.emit_agc_code "AGC-M050" 
-      (concat "Send to non-existent pid: " target_pid))
+    (scheduler.emit-agc-code "AGC-M050" 
+      (concat "Send to non-existent pid: " target-pid))
     (return nil))
   
   ;; Check mailbox capacity
-  (let mailbox_length (length (. target mailbox)))
+  (let mailbox-length (length (. target mailbox)))
   
-  (if (>= mailbox_length (. target mailbox_max))
+  (if (>= mailbox-length (. target mailbox-max))
     ;; Mailbox is full - apply overflow policy
-    (match (. target mailbox_overflow_policy)
+    (match (. target mailbox-overflow-policy)
       ("drop-oldest"
-        (array_shift (. target mailbox))  ; Remove oldest
-        (array_push (. target mailbox) msg)
-        (scheduler.emit_agc_code "AGC-M010" 
-          (concat "Mailbox overflow (drop-oldest) for task " target_pid)))
+        (array-shift (. target mailbox))  ; Remove oldest
+        (array-push (. target mailbox) msg)
+        (scheduler.emit-agc-code "AGC-M010" 
+          (concat "Mailbox overflow (drop-oldest) for task " target-pid)))
       
       ("drop-newest"
         ;; Do nothing - drop the new message
-        (scheduler.emit_agc_code "AGC-M010"
-          (concat "Mailbox overflow (drop-newest) for task " target_pid)))
+        (scheduler.emit-agc-code "AGC-M010"
+          (concat "Mailbox overflow (drop-newest) for task " target-pid)))
       
       ("reject"
         ;; Send error back to sender
         (when sender
-          (array_push (. sender mailbox) 
-            (array "mailbox_full" target_pid)))
-        (scheduler.emit_agc_code "AGC-M010"
-          (concat "Mailbox overflow (reject) for task " target_pid)))
+          (array-push (. sender mailbox) 
+            (array "mailbox-full" target-pid)))
+        (scheduler.emit-agc-code "AGC-M010"
+          (concat "Mailbox overflow (reject) for task " target-pid)))
       
       ("escalate"
         ;; Crash the target task
         (set! (. target status) "crashed")
-        (scheduler.emit_agc_code "AGC-M010"
-          (concat "Mailbox overflow (escalate) - crashing task " target_pid))
-        (target.recordExceptional "mailbox_overflow" (object (sender (if sender (. sender id) nil))))))
+        (scheduler.emit-agc-code "AGC-M010"
+          (concat "Mailbox overflow (escalate) - crashing task " target-pid))
+        (target.recordExceptional "mailbox-overflow" (object (sender (if sender (. sender id) nil))))))
     
     ;; Mailbox has space - append message
     (begin
-      (array_push (. target mailbox) msg)
+      (array-push (. target mailbox) msg)
       
       ;; Record in sender's stats
       (when sender
-        (set! (. sender total_messages_sent) 
-          (+ (. sender total_messages_sent) 1)))
+        (set! (. sender total-messages-sent) 
+          (+ (. sender total-messages-sent) 1)))
       
       ;; Record in orchestrator history
-      (ring_buffer_push! (. scheduler orchestrator_history)
+      (ring-buffer-push! (. scheduler orchestrator-history)
         (object
           (type "send")
           (timestamp (timestamp))
           (from (if sender (. sender id) nil))
-          (to target_pid)
+          (to target-pid)
           (message msg)))))
   
   ;; **CRUCIAL WAKE-UP LOGIC**
   ;; If target is waiting on receive, check if new message matches
   (when (= (. target status) "waiting")
-    (when (. target waiting_patterns)
-      (let matched (try_match_patterns msg (. target waiting_patterns)))
+    (when (. target waiting-patterns)
+      (let matched (try-match-patterns msg (. target waiting-patterns)))
       (when matched
         ;; Message matches! Wake the task up
-        (map_delete! (. scheduler waiting_tasks) target_pid)
+        (map-delete! (. scheduler waiting-tasks) target-pid)
         (set! (. target status) "runnable")
-        (set! (. target waiting_patterns) nil)
+        (set! (. target waiting-patterns) nil)
         (scheduler.schedule target)
         
         ;; Record wake-up event
-        (target.recordExceptional "woken_by_message" 
+        (target.recordExceptional "woken-by-message" 
           (object (sender (if sender (. sender id) nil))))))))
 ```
 
@@ -548,14 +548,14 @@ function send(targetPid, msg) {
         break;
       case 'reject':
         if (sender) {
-          sender.mailbox.push({ tag: 'mailbox_full', targetPid });
+          sender.mailbox.push({ tag: 'mailbox-full', targetPid });
         }
         scheduler.emitAGCCode('AGC-M010', `Mailbox overflow (reject) for task ${targetPid}`);
         break;
       case 'escalate':
         target.status = 'crashed';
         scheduler.emitAGCCode('AGC-M010', `Mailbox overflow (escalate) - crashing task ${targetPid}`);
-        target.recordExceptional('mailbox_overflow', { sender: sender?.id });
+        target.recordExceptional('mailbox-overflow', { sender: sender?.id });
         break;
     }
   } else {
@@ -584,7 +584,7 @@ function send(targetPid, msg) {
       target.waitingPatterns = null;
       scheduler.schedule(target);
       
-      target.recordExceptional('woken_by_message', { sender: sender?.id });
+      target.recordExceptional('woken-by-message', { sender: sender?.id });
     }
   }
 }
@@ -600,35 +600,35 @@ For basic receive (just pop the first message):
 (defn receive ()
   "Block until a message arrives, then return it"
   ;; In generator context, this yields a primitive
-  (generator_yield (object (type "receive") (patterns nil))))
+  (generator-yield (object (type "receive") (patterns nil))))
 ```
 
 **Scheduler handling of `"receive"` primitive:**
 
 ```t2
-(method handle_receive (task:Task patterns:array)
+(method handle-receive (task:Task patterns:array)
   "Handle receive primitive - may block task"
   
   (if (> (length (. task mailbox)) 0)
     ;; Mailbox not empty
     (if patterns
       ;; Selective receive (Stage 3)
-      (this.handle_selective_receive task patterns)
+      (this.handle-selective-receive task patterns)
       ;; Simple receive - pop first message
-      (let msg (array_shift (. task mailbox)))
-      (set! (. task total_messages_received) (+ (. task total_messages_received) 1))
+      (let msg (array-shift (. task mailbox)))
+      (set! (. task total-messages-received) (+ (. task total-messages-received) 1))
       ;; Resume generator with message
-      (set! (. task gen) (generator_send (. task gen) msg)))
+      (set! (. task gen) (generator-send (. task gen) msg)))
     
     ;; Mailbox empty - block task
     (begin
       (set! (. task status) "waiting")
-      (set! (. task waiting_patterns) patterns)
-      (map_set! (. this waiting_tasks) (. task id) task)
+      (set! (. task waiting-patterns) patterns)
+      (map-set! (. this waiting-tasks) (. task id) task)
       
       ;; Emit warning if task has been waiting too long
       ;; (this would be checked periodically by scheduler)
-      (task.recordExceptional "blocked_on_receive" (object)))))
+      (task.recordExceptional "blocked-on-receive" (object)))))
 ```
 
 **JavaScript Implementation:**
@@ -653,7 +653,7 @@ handleReceive(task, patterns) {
     task.waitingPatterns = patterns;
     this.waitingTasks.set(task.id, task);
     
-    task.recordExceptional('blocked_on_receive', {});
+    task.recordExceptional('blocked-on-receive', {});
   }
 }
 ```
@@ -663,32 +663,32 @@ handleReceive(task, patterns) {
 The scheduler should periodically check for mailbox pathologies:
 
 ```t2
-(method check_mailbox_health (task:Task)
+(method check-mailbox-health (task:Task)
   "Emit AGC codes for mailbox issues"
   
   ;; AGC-M020: Slow consumer (mailbox growing)
-  (when (> (length (. task mailbox)) (* (. task mailbox_max) 0.75))
-    (this.emit_agc_code "AGC-M020"
+  (when (> (length (. task mailbox)) (* (. task mailbox-max) 0.75))
+    (this.emit-agc-code "AGC-M020"
       (concat "Slow consumer: task " (. task id) " mailbox at " 
               (length (. task mailbox)) " messages")))
   
   ;; AGC-M030: Unhandled messages (message stuck too long)
   (when (> (length (. task mailbox)) 0)
-    (let oldest_msg (get (. task mailbox) 0))
-    (when (. oldest_msg timestamp)
-      (let age (- (timestamp) (. oldest_msg timestamp)))
+    (let oldest-msg (get (. task mailbox) 0))
+    (when (. oldest-msg timestamp)
+      (let age (- (timestamp) (. oldest-msg timestamp)))
       (when (> age 5000)  ; 5 seconds
-        (this.emit_agc_code "AGC-M031"
+        (this.emit-agc-code "AGC-M031"
           (concat "Message stuck for " age "ms in task " (. task id))))))
   
   ;; AGC-M040: Excessive mailbox scanning
-  (when (> (. task mailbox_scan_count) 100)
-    (let avg_scan_ops (/ (. task total_mailbox_scan_operations) 
-                         (. task mailbox_scan_count)))
-    (when (> avg_scan_ops 50)
-      (this.emit_agc_code "AGC-M040"
+  (when (> (. task mailbox-scan-count) 100)
+    (let avg-scan-ops (/ (. task total-mailbox-scan-operations) 
+                         (. task mailbox-scan-count)))
+    (when (> avg-scan-ops 50)
+      (this.emit-agc-code "AGC-M040"
         (concat "Excessive mailbox scanning: task " (. task id)
-                " avg " avg_scan_ops " ops per scan"))))
+                " avg " avg-scan-ops " ops per scan"))))
 )
 ```
 
@@ -718,7 +718,7 @@ Before implementing selective receive, we need pattern matching.
 
 ;; Tagged tuple patterns (arrays with string tags)
 (array "get" from)              ; Matches (array "get" <any>), binds second element to 'from'
-(array "user_data" name age)    ; Matches (array "user_data" <any> <any>), binds both
+(array "user-data" name age)    ; Matches (array "user-data" <any> <any>), binds both
 
 ;; Nested patterns
 (array "result" (array "ok" value))    ; Matches nested structure
@@ -733,7 +733,7 @@ _                        ; Matches anything, doesn't bind
 **Pattern Matching Algorithm:**
 
 ```t2
-(defn match_pattern (pattern:any value:any bindings:object)
+(defn match-pattern (pattern:any value:any bindings:object)
   "Attempt to match pattern against value. Returns bindings map or nil."
   
   (cond
@@ -743,7 +743,7 @@ _                        ; Matches anything, doesn't bind
     
     ;; Symbol binding (lowercase identifier) - matches anything, binds value
     ((symbol? pattern)
-      (map_set bindings pattern value))
+      (map-set bindings pattern value))
     
     ;; Literal match (keyword, number, string)
     ((or (keyword? pattern) (number? pattern) (string? pattern))
@@ -759,7 +759,7 @@ _                        ; Matches anything, doesn't bind
           (lambda (acc i)
             (if (not acc)
               nil
-              (match_pattern (get pattern i) (get value i) acc)))
+              (match-pattern (get pattern i) (get value i) acc)))
           bindings
           (range 0 (length pattern)))
         nil))
@@ -818,28 +818,28 @@ In t2-lang, `receive` is a macro that expands into a mailbox scanning loop:
 ```t2
 ;; User writes:
 (receive
-  ((array "high_priority" data) 
-    (process_high data))
-  ((array "low_priority" data) 
-    (process_low data))
+  ((array "high-priority" data) 
+    (process-high data))
+  ((array "low-priority" data) 
+    (process-low data))
   (_ 
-    (handle_unknown)))
+    (handle-unknown)))
 
 ;; Expands to:
-(let __receive_result 
-  (generator_yield 
+(let __receive-result 
+  (generator-yield 
     (object
       (type "receive")
       (patterns (array
-        (object (pattern (array "high_priority" data)) (body (process_high data)))
-        (object (pattern (array "low_priority" data)) (body (process_low data)))
-        (object (pattern _) (body (handle_unknown))))))))
+        (object (pattern (array "high-priority" data)) (body (process-high data)))
+        (object (pattern (array "low-priority" data)) (body (process-low data)))
+        (object (pattern _) (body (handle-unknown))))))))
 ;; After scheduler resumes with matched message and bindings:
-(let data (get __receive_result "bindings"))
-(match __receive_result.matched_pattern_index
-  (0 (process_high (get data 'data)))
-  (1 (process_low (get data 'data)))
-  (2 (handle_unknown)))
+(let data (get __receive-result "bindings"))
+(match __receive-result.matched-pattern-index
+  (0 (process-high (get data 'data)))
+  (1 (process-low (get data 'data)))
+  (2 (handle-unknown)))
 ```
 
 ### 3.4 Scheduler's Selective Receive Handler
@@ -847,53 +847,53 @@ In t2-lang, `receive` is a macro that expands into a mailbox scanning loop:
 **Full Algorithm with Reduction Budget:**
 
 ```t2
-(method handle_selective_receive (task:Task patterns:array)
+(method handle-selective-receive (task:Task patterns:array)
   "Scan mailbox for first matching pattern"
   
   ;; Track statistics
-  (set! (. task mailbox_scan_count) (+ (. task mailbox_scan_count) 1))
+  (set! (. task mailbox-scan-count) (+ (. task mailbox-scan-count) 1))
   
   ;; Scan mailbox
   (let mailbox (. task mailbox))
-  (let scan_count 0)
+  (let scan-count 0)
   
-  (for_each-indexed mailbox (lambda (msg index)
+  (for-each-indexed mailbox (lambda (msg index)
     ;; Check reduction budget
-    (set! scan_count (+ scan_count 1))
-    (set! (. task total_mailbox_scan_operations) 
-          (+ (. task total_mailbox_scan_operations) 1))
+    (set! scan-count (+ scan-count 1))
+    (set! (. task total-mailbox-scan-operations) 
+          (+ (. task total-mailbox-scan-operations) 1))
     
-    (when (>= scan_count (. task budget))
+    (when (>= scan-count (. task budget))
       ;; Exceeded budget - must yield and continue later
-      (task.recordExceptional "mailbox_scan_budget_exceeded" 
-        (object (scanned scan_count) (remaining (- (length mailbox) index))))
+      (task.recordExceptional "mailbox-scan-budget-exceeded" 
+        (object (scanned scan-count) (remaining (- (length mailbox) index))))
       (set! (. task budget) 0)
-      (return "budget_exceeded"))
+      (return "budget-exceeded"))
     
     ;; Try each pattern in order
-    (for_each patterns (lambda (pattern_spec)
-      (let bindings (match_pattern (. pattern_spec pattern) msg {}))
+    (for-each patterns (lambda (pattern-spec)
+      (let bindings (match-pattern (. pattern-spec pattern) msg {}))
       
       (when bindings
         ;; Match found! Remove message from mailbox
-        (array_remove_at! mailbox index)
-        (set! (. task total_messages_received) 
-              (+ (. task total_messages_received) 1))
+        (array-remove-at! mailbox index)
+        (set! (. task total-messages-received) 
+              (+ (. task total-messages-received) 1))
         
         ;; Record in task history
-        (task.recordExceptional "received_message" 
+        (task.recordExceptional "received-message" 
           (object
             (message msg)
-            (pattern_index (indexOf patterns pattern_spec))
-            (mailbox_position index)))
+            (pattern-index (indexOf patterns pattern-spec))
+            (mailbox-position index)))
         
         ;; Resume generator with match result
-        (let match_result 
+        (let match-result 
           (object
-            (matched_pattern_index (indexOf patterns pattern_spec))
+            (matched-pattern-index (indexOf patterns pattern-spec))
             (message msg)
             (bindings bindings)))
-        (set! (. task gen) (generator_send (. task gen) match_result))
+        (set! (. task gen) (generator-send (. task gen) match-result))
         
         (return "matched"))))
     
@@ -901,16 +901,16 @@ In t2-lang, `receive` is a macro that expands into a mailbox scanning loop:
     nil))
   
   ;; If we get here, no message matched any pattern
-  (when (not= scan_count "budget_exceeded")
+  (when (not= scan-count "budget-exceeded")
     ;; Block task until new message arrives
     (set! (. task status) "waiting")
-    (set! (. task waiting_patterns) patterns)
-    (map_set! (. this waiting_tasks) (. task id) task)
+    (set! (. task waiting-patterns) patterns)
+    (map-set! (. this waiting-tasks) (. task id) task)
     
-    (task.recordExceptional "blocked_on_selective_receive" 
+    (task.recordExceptional "blocked-on-selective-receive" 
       (object
-        (patterns_count (length patterns))
-        (mailbox_size (length mailbox))))))
+        (patterns-count (length patterns))
+        (mailbox-size (length mailbox))))))
 ```
 
 **JavaScript Implementation:**
@@ -928,12 +928,12 @@ handleSelectiveReceive(task, patterns) {
     
     // Check reduction budget
     if (scanCount >= task.budget) {
-      task.recordExceptional('mailbox_scan_budget_exceeded', {
+      task.recordExceptional('mailbox-scan-budget-exceeded', {
         scanned: scanCount,
         remaining: mailbox.length - index
       });
       task.budget = 0;
-      return 'budget_exceeded';
+      return 'budget-exceeded';
     }
     
     // Try each pattern in order
@@ -946,7 +946,7 @@ handleSelectiveReceive(task, patterns) {
         mailbox.splice(index, 1);
         task.totalMessagesReceived++;
         
-        task.recordExceptional('received_message', {
+        task.recordExceptional('received-message', {
           message: msg,
           patternIndex,
           mailboxPosition: index
@@ -971,7 +971,7 @@ handleSelectiveReceive(task, patterns) {
   task.waitingPatterns = patterns;
   this.waitingTasks.set(task.id, task);
   
-  task.recordExceptional('blocked_on_selective_receive', {
+  task.recordExceptional('blocked-on-selective-receive', {
     patternsCount: patterns.length,
     mailboxSize: mailbox.length
   });
@@ -983,10 +983,10 @@ handleSelectiveReceive(task, patterns) {
 Earlier in Stage 2 we showed basic wake-up logic in `send`. Now we refine it for selective receive:
 
 ```t2
-(defn try_match_patterns (msg:any patterns:array)
+(defn try-match-patterns (msg:any patterns:array)
   "Check if message matches any of the waiting patterns"
-  (for_each patterns (lambda (pattern_spec)
-    (let bindings (match_pattern (. pattern_spec pattern) msg {}))
+  (for-each patterns (lambda (pattern-spec)
+    (let bindings (match-pattern (. pattern-spec pattern) msg {}))
     (when bindings
       (return true))))
   false)
@@ -1003,17 +1003,17 @@ This is called in `send` when a task is in `"waiting"` status.
     (receive
       ;; High priority messages processed first
       ((array "urgent" task) 
-        (effect cap_log "info" "Processing urgent task")
-        (process_urgent task))
+        (effect cap-log "info" "Processing urgent task")
+        (process-urgent task))
       
       ;; Normal messages processed if no urgent
       ((array "normal" task)
-        (effect cap_log "info" "Processing normal task")
-        (process_normal task))
+        (effect cap-log "info" "Processing normal task")
+        (process-normal task))
       
       ;; Everything else
       (msg
-        (effect cap_log "warn" "Unknown message" msg)))
+        (effect cap-log "warn" "Unknown message" msg)))
     
     (yield)
     (recur)))
@@ -1079,11 +1079,11 @@ function makeIOCapability(allowedHosts = []) {
 }
 
 function makeTimerCapability() {
-  return new Capability('timer', ['sleep', 'set_timeout', 'set_interval']);
+  return new Capability('timer', ['sleep', 'set-timeout', 'set-interval']);
 }
 
 function makeRandomCapability() {
-  return new Capability('random', ['next', 'next_int', 'next_float']);
+  return new Capability('random', ['next', 'next-int', 'next-float']);
 }
 ```
 
@@ -1092,36 +1092,36 @@ function makeRandomCapability() {
 **At Spawn Time:**
 ```t2
 ;; Parent has three capabilities
-(task parent (cap_log cap_io cap_timer)
+(task parent (cap-log cap-io cap-timer)
   ;; Spawn child with only log and timer capabilities
   ;; Child CANNOT perform I/O
-  (let child_pid (spawn child_worker (array cap_log cap_timer) "normal"))
+  (let child-pid (spawn child-worker (array cap-log cap-timer) "normal"))
   
-  (send child_pid (array "start"))
+  (send child-pid (array "start"))
   (yield))
 
-(task child_worker (cap_log cap_timer)
+(task child-worker (cap-log cap-timer)
   (receive
     ((array "start")
-      (effect cap_log "info" "Child started")
-      (effect cap_timer "sleep" 1000)
-      ;; child_worker does NOT have cap_io, so cannot do network I/O
+      (effect cap-log "info" "Child started")
+      (effect cap-timer "sleep" 1000)
+      ;; child-worker does NOT have cap-io, so cannot do network I/O
       (yield))))
 ```
 
 **Via Messages:**
 ```t2
 ;; Capability delegation via message passing
-(task gatekeeper (cap_io)
+(task gatekeeper (cap-io)
   (receive
-    ((array "grant_io_access" to_pid)
+    ((array "grant-io-access" to-pid)
       ;; Send capability to another task
-      (send to_pid (array "io_capability" cap_io))
+      (send to-pid (array "io-capability" cap-io))
       (yield))))
 
 (task worker ()
   (receive
-    ((array "io_capability" cap)
+    ((array "io-capability" cap)
       ;; Worker now has I/O capability
       (let data (effect cap "read" "https://example.com"))
       (yield))))
@@ -1138,7 +1138,7 @@ function makeRandomCapability() {
   "Perform a side-effect with capability authorization"
   
   ;; Yield to scheduler for verification and execution
-  (generator_yield 
+  (generator-yield 
     (object
       (type "effect")
       (capability capability)
@@ -1149,20 +1149,20 @@ function makeRandomCapability() {
 **Scheduler's Effect Handler:**
 
 ```t2
-(method handle_effect (task:Task capability:Capability operation:string args:array)
+(method handle-effect (task:Task capability:Capability operation:string args:array)
   "Verify capability and dispatch effect"
   
   ;; 1. Verify task holds the capability
-  (when (not (set_contains? (. task capabilities) capability))
-    (this.emit_agc_code "AGC-CAP500" 
+  (when (not (set-contains? (. task capabilities) capability))
+    (this.emit-agc-code "AGC-CAP500" 
       (concat "Task " (. task id) " attempted effect without capability"))
     (set! (. task status) "crashed")
     (task.recordCritical "AGC-CAP500" "Unauthorized capability usage")
     (return))
   
   ;; 2. Verify capability allows this operation
-  (when (not (capability.can_perform? operation))
-    (this.emit_agc_code "AGC-CAP510"
+  (when (not (capability.can-perform? operation))
+    (this.emit-agc-code "AGC-CAP510"
       (concat "Capability " (. capability type) " does not support operation " operation))
     (set! (. task status) "crashed")
     (return))
@@ -1171,65 +1171,65 @@ function makeRandomCapability() {
   (task.recordEffect capability operation args)
   
   ;; 4. Dispatch effect (with latency tracking)
-  (let start_time (timestamp))
+  (let start-time (timestamp))
   (let result nil)
   
   (try
-    (set! result (this.dispatch_effect capability operation args))
+    (set! result (this.dispatch-effect capability operation args))
     (catch error
-      (this.emit_agc_code "AGC-E001"
+      (this.emit-agc-code "AGC-E001"
         (concat "Effect failed: " (. error message)))
-      (task.recordExceptional "effect_error" (object (operation operation) (error error)))))
+      (task.recordExceptional "effect-error" (object (operation operation) (error error)))))
   
-  (let duration (- (timestamp) start_time))
+  (let duration (- (timestamp) start-time))
   
   ;; 5. Check for slow effects
   (when (> duration 100)  ; 100ms threshold
-    (this.emit_agc_code "AGC-E050"
+    (this.emit-agc-code "AGC-E050"
       (concat "Slow effect: " operation " took " duration "ms")))
   
   ;; 6. Resume generator with result
-  (set! (. task gen) (generator_send (. task gen) result)))
+  (set! (. task gen) (generator-send (. task gen) result)))
 
-(method dispatch_effect (capability:Capability operation:string args:array)
+(method dispatch-effect (capability:Capability operation:string args:array)
   "Actually perform the effect (calls into JavaScript runtime)"
   
   (match (. capability type)
     ("log"
-      (this.effect_log operation args))
+      (this.effect-log operation args))
     
     ("io"
-      (this.effect_io operation args capability))
+      (this.effect-io operation args capability))
     
     ("timer"
-      (this.effect_timer operation args))
+      (this.effect-timer operation args))
     
     ("random"
-      (this.effect_random operation args))
+      (this.effect-random operation args))
     
     ("shared-blob"
-      (this.effect_shared_blob operation args capability))
+      (this.effect-shared-blob operation args capability))
     
     (_
       (throw (Error (concat "Unknown capability type: " (. capability type)))))))
 
 ;; Effect implementations
 
-(method effect_log (operation:string args:array)
+(method effect-log (operation:string args:array)
   (match operation
     ("info" (console.log "[INFO]" ...args))
     ("warn" (console.warn "[WARN]" ...args))
     ("error" (console.error "[ERROR]" ...args))
     ("debug" (console.debug "[DEBUG]" ...args))))
 
-(method effect_io (operation:string args:array capability:Capability)
+(method effect-io (operation:string args:array capability:Capability)
   (match operation
     ("fetch" 
       (let (url) args)
       ;; Check allowed hosts
       (when (and (. capability metadata allowedHosts)
                  (> (length (. capability metadata allowedHosts)) 0))
-        (let host (extract_host url))
+        (let host (extract-host url))
         (when (not (includes? (. capability metadata allowedHosts) host))
           (throw (Error (concat "Host not allowed: " host)))))
       ;; Perform fetch
@@ -1244,27 +1244,27 @@ function makeRandomCapability() {
       (let (path data) args)
       ...)))
 
-(method effect_timer (operation:string args:array)
+(method effect-timer (operation:string args:array)
   (match operation
     ("sleep"
       (let (ms) args)
       ;; In cooperative context, this is tricky - may need to block task
       ;; and resume after timeout
-      (this.schedule_task_resume (. this current_task) ms))
+      (this.schedule-task-resume (. this current-task) ms))
     
-    ("set_timeout"
+    ("set-timeout"
       (let (callback ms) args)
       (setTimeout callback ms))
     
-    ("set_interval"
+    ("set-interval"
       (let (callback ms) args)
       (setInterval callback ms))))
 
-(method effect_random (operation:string args:array)
+(method effect-random (operation:string args:array)
   (match operation
     ("next" () (Math.random))
-    ("next_int" (let (max) args) (Math.floor (* (Math.random) max)))
-    ("next_float" (let (min max) args) (+ min (* (Math.random) (- max min))))))
+    ("next-int" (let (max) args) (Math.floor (* (Math.random) max)))
+    ("next-float" (let (min max) args) (+ min (* (Math.random) (- max min))))))
 ```
 
 **JavaScript Implementation:**
@@ -1298,7 +1298,7 @@ handleEffect(task, capability, operation, args) {
     result = this.dispatchEffect(capability, operation, args);
   } catch (error) {
     this.emitAGCCode('AGC-E001', `Effect failed: ${error.message}`);
-    task.recordExceptional('effect_error', { operation, error });
+    task.recordExceptional('effect-error', { operation, error });
     throw error;
   }
   
@@ -1343,12 +1343,12 @@ effectLog(operation, args) {
 
 ### 4.4 Effect History
 
-Each task records all effects in `history_effects` ring buffer:
+Each task records all effects in `history-effects` ring buffer:
 
 ```javascript
 {
   timestamp: 1234567890,
-  capability: "uuid_of_capability",
+  capability: "uuid-of-capability",
   operation: "fetch",
   args: ["https://example.com"],
   duration: 45,  // milliseconds
@@ -1366,7 +1366,7 @@ This enables:
 **Capability Codes:**
 - `AGC-CAP500` - Unverified capability usage
 - `AGC-CAP510` - Passing unregistered capability into spawn
-- `AGC-CAP520` - Capability revoked mid_operation
+- `AGC-CAP520` - Capability revoked mid-operation
 
 **Effect Codes:**
 - `AGC-E001` - Effect execution failed
@@ -1394,7 +1394,7 @@ Based on DESIGN.md and DLITE.md, here is the full set of AGC diagnostic codes:
 - **AGC-PROT200** - Protocol mismatch (send uses wrong message shape)
 - **AGC-PROT210** - Unhandled protocol message
 - **AGC-PROT220** - Unreachable receive clause
-- **AGC-PROT230** - Breaking protocol change across versions (hot_swap incompatibility)
+- **AGC-PROT230** - Breaking protocol change across versions (hot-swap incompatibility)
 
 #### Scheduler-Level (S1xx)
 - **AGC-S100** - System overload detected
@@ -1436,35 +1436,35 @@ Based on DESIGN.md and DLITE.md, here is the full set of AGC diagnostic codes:
   (field (code:string))           ; e.g. "AGC-M010"
   (field (message:string))        ; Human-readable description
   (field (timestamp:number))      ; When emitted
-  (field (task_id:number))        ; Which task (if applicable)
+  (field (task-id:number))        ; Which task (if applicable)
   (field (context:object))        ; Additional data
 )
 
-(method emit_agc_code (code:string message:string)
+(method emit-agc-code (code:string message:string)
   "Emit an AGC diagnostic code to multiple channels"
   
   (let event (AGCEvent.new code message (timestamp) 
-                           (if (. this current_task) 
-                               (. this current_task id) 
+                           (if (. this current-task) 
+                               (. this current-task id) 
                                nil)
                            (object)))
   
   ;; 1. Add to global AGC codes list
-  (array_push (. this agc_codes_emitted) event)
+  (array-push (. this agc-codes-emitted) event)
   
   ;; 2. Add to orchestrator history
-  (ring_buffer_push! (. this orchestrator_history) event)
+  (ring-buffer-push! (. this orchestrator-history) event)
   
   ;; 3. Add to current task's critical history (if in task context)
-  (when (. this current_task)
-    ((. this current_task) recordCritical code message))
+  (when (. this current-task)
+    ((. this current-task) recordCritical code message))
   
   ;; 4. Emit to console (with color coding if possible)
   (console.error (concat "[" code "] " message))
   
   ;; 5. Optional: Send to external monitoring system
-  (when (. this monitoring_callback)
-    ((. this monitoring_callback) event)))
+  (when (. this monitoring-callback)
+    ((. this monitoring-callback) event)))
 ```
 
 **JavaScript Implementation:**
@@ -1506,7 +1506,7 @@ emitAGCCode(code, message, context = {}) {
 
 Each task maintains three separate ring-buffered histories:
 
-#### 5.3.1 Effects History (`history_effects`)
+#### 5.3.1 Effects History (`history-effects`)
 Records all `effect` calls:
 ```javascript
 {
@@ -1519,17 +1519,17 @@ Records all `effect` calls:
 }
 ```
 
-#### 5.3.2 Exceptional History (`history_exceptional`)
+#### 5.3.2 Exceptional History (`history-exceptional`)
 Records "interesting" runtime events:
 ```javascript
 {
   timestamp: number,
-  type: string,  // 'blocked_on_receive', 'woken_by_message', 'effect_error', etc.
+  type: string,  // 'blocked-on-receive', 'woken-by-message', 'effect-error', etc.
   data: object
 }
 ```
 
-#### 5.3.3 Critical History (`history_critical`)
+#### 5.3.3 Critical History (`history-critical`)
 Records AGC codes emitted in the context of this task:
 ```javascript
 {
@@ -1701,17 +1701,17 @@ The `task` macro provides syntactic sugar for defining tasks:
 
 ```t2
 ;; User writes:
-(task counter (initial_value cap_log)
+(task counter (initial-value cap-log)
   ("priority" "normal")
-  ("max_mailbox" 500)
-  ("on_overflow" "drop-oldest")
+  ("max-mailbox" 500)
+  ("on-overflow" "drop-oldest")
   
-  (let state initial_value)
+  (let state initial-value)
   (loop
     (receive
       ((array "inc" n)
         (set! state (+ state n))
-        (effect cap_log "info" "Incremented to" state))
+        (effect cap-log "info" "Incremented to" state))
       
       ((array "get" from)
         (send from state)))
@@ -1719,44 +1719,44 @@ The `task` macro provides syntactic sugar for defining tasks:
     (recur)))
 
 ;; Expands to:
-(def counter_fn 
-  (generator_function (initial_value cap_log)
+(def counter-fn 
+  (generator-function (initial-value cap-log)
     ;; Mailbox configuration happens at spawn time
-    (let state initial_value)
+    (let state initial-value)
     (loop
       ...)))
 
 ;; When spawned:
-(let counter_pid (spawn counter_fn (array 0 my_cap_log) "normal" (make_set)))
+(let counter-pid (spawn counter-fn (array 0 my-cap-log) "normal" (make-set)))
 ;; Additional: configure mailbox on the task
-(let task (map_get scheduler.tasks counter_pid))
+(let task (map-get scheduler.tasks counter-pid))
 (task.configureMailbox 500 "drop-oldest")
 ```
 
 **Macro Implementation Sketch:**
 ```t2
-(defmacro task (name params & options_and_body)
+(defmacro task (name params & options-and-body)
   "Define a task with options"
   
   ;; Parse options (keywords starting with :)
-  (let options (take_while (lambda (form) (starts_with? form ":")) options_and_body))
-  (let body (drop (length options) options_and_body))
+  (let options (take-while (lambda (form) (starts-with? form ":")) options-and-body))
+  (let body (drop (length options) options-and-body))
   
   ;; Extract option values
-  (let priority (or (get_option options "priority") "normal"))
-  (let max_mailbox (or (get_option options "max_mailbox") 1000))
-  (let on_overflow (or (get_option options "on_overflow") "drop-oldest"))
+  (let priority (or (get-option options "priority") "normal"))
+  (let max-mailbox (or (get-option options "max-mailbox") 1000))
+  (let on-overflow (or (get-option options "on-overflow") "drop-oldest"))
   
   ;; Generate function definition
   `(def ~(symbol (concat (string name) "-fn"))
-     (generator_function ~params
+     (generator-function ~params
        ;; Store metadata for spawn helper
        (do
-         (set! (. (current_generator) __t2-task_options)
+         (set! (. (current-generator) __t2-task-options)
            (object
              (priority ~priority)
-             (max_mailbox ~max_mailbox)
-             (on_overflow ~on_overflow)))
+             (max-mailbox ~max-mailbox)
+             (on-overflow ~on-overflow)))
          ~@body))))
 ```
 
@@ -1768,24 +1768,24 @@ Defines message protocols at compile time and stores them in a global registry:
 ;; User writes:
 (defprotocol Counter
   (array "inc" n)
-  (array "get" from ("reply_shape" "integer"))
+  (array "get" from ("reply-shape" "integer"))
   (array "reset"))
 
 ;; Expands to:
 (do
   ;; Store in global protocol registry
-  (map_set! __t2agc__.protocols "Counter"
+  (map-set! __t2agc__.protocols "Counter"
     (object
       (name "Counter")
       (messages (array
         (object (tag "inc") (arity 1) (params (array "n")))
-        (object (tag "get") (arity 1) (params (array "from")) (reply_shape "integer"))
+        (object (tag "get") (arity 1) (params (array "from")) (reply-shape "integer"))
         (object (tag "reset") (arity 0) (params (array)))))))
   
   ;; Optionally generate helper constructors
-  (defn make_counter_inc (n) (array "inc" n))
-  (defn make_counter_get (from) (array "get" from))
-  (defn make_counter_reset () (array "reset")))
+  (defn make-counter-inc (n) (array "inc" n))
+  (defn make-counter-get (from) (array "get" from))
+  (defn make-counter-reset () (array "reset")))
 ```
 
 **Runtime Protocol Storage:**
@@ -1816,22 +1816,22 @@ Defines opaque types with encapsulation:
   ;; Define backing class
   (class __Counter
     (field (value:number))
-    (field (__opaque_tag:symbol)))
+    (field (__opaque-tag:symbol)))
   
   ;; Constructor
-  (defn make_counter (value:number)
+  (defn make-counter (value:number)
     (let instance (new __Counter))
     (set! (. instance value) value)
     instance)
   
   ;; Accessor
-  (defn counter_value (counter_instance:__Counter)
-    (. counter_instance value))
+  (defn counter-value (counter-instance:__Counter)
+    (. counter-instance value))
   
   ;; Pattern match helper (checks tag only)
   (defn counter? (obj)
     (and (object? obj) 
-         (= (. obj __opaque_tag) (Symbol "Counter")))))
+         (= (. obj __opaque-tag) (Symbol "Counter")))))
 ```
 
 ### 6.4 `spawn` Helper Macro
@@ -1840,15 +1840,15 @@ Simplifies spawning tasks defined with the `task` macro:
 
 ```t2
 ;; User writes:
-(spawn_task counter [0 cap_log])
+(spawn-task counter [0 cap-log])
 
 ;; Expands to:
-(let task_options (. counter_fn __t2-task_options))
-(let pid (spawn counter_fn [0 cap_log] (. task_options priority) (make_set)))
-(let task_instance (map_get scheduler.tasks pid))
-(task_instance.configureMailbox 
-  (. task_options max_mailbox)
-  (. task_options on_overflow))
+(let task-options (. counter-fn __t2-task-options))
+(let pid (spawn counter-fn [0 cap-log] (. task-options priority) (make-set)))
+(let task-instance (map-get scheduler.tasks pid))
+(task-instance.configureMailbox 
+  (. task-options max-mailbox)
+  (. task-options on-overflow))
 pid
 ```
 
@@ -1862,64 +1862,64 @@ pid
 (deftype ChildSpec
   ("id" symbol)
   ("start" function)           ; Function or behavior to spawn
-  ("capabilities" (list_of Capability))
-  ("restart_policy" (union "permanent" "transient" "temporary"))
-  ("shutdown_timeout" number)  ; milliseconds
+  ("capabilities" (list-of Capability))
+  ("restart-policy" (union "permanent" "transient" "temporary"))
+  ("shutdown-timeout" number)  ; milliseconds
   ("type" (union "worker" "supervisor")))
 ```
 
 **Supervisor Behavior:**
 ```t2
-(behavior supervisor (child_specs strategy max_restarts max_time)
+(behavior supervisor (child-specs strategy max-restarts max-time)
   ("protocol" Supervisor)
   
-  (let children (object))      ; Map: child_id -> pid
-  (let restart_counts (object)) ; Map: child_id -> [(timestamp count)]
+  (let children (object))      ; Map: child-id -> pid
+  (let restart-counts (object)) ; Map: child-id -> [(timestamp count)]
   
   (loop
     (receive
       ;; Child died
-      ((array "exit" child_id reason)
-        (let spec (find_child_spec child_specs child_id))
-        (match (. spec restart_policy)
+      ((array "exit" child-id reason)
+        (let spec (find-child-spec child-specs child-id))
+        (match (. spec restart-policy)
           ("permanent" 
-            (restart_child spec))
+            (restart-child spec))
           
           ("transient"
             (when (not= reason "normal")
-              (restart_child spec)))
+              (restart-child spec)))
           
           ("temporary"
             ;; Don't restart
             nil)))
       
       ;; Start all children
-      ((array "start_all" from)
-        (for_each child_specs (lambda (spec)
-          (let pid (start_child spec))
-          (map_set! children (. spec id) pid)))
+      ((array "start-all" from)
+        (for-each child-specs (lambda (spec)
+          (let pid (start-child spec))
+          (map-set! children (. spec id) pid)))
         (send from "ok"))
       
       ;; Introspection
-      ((array "which_children" from)
+      ((array "which-children" from)
         (send from children)))
     
     (yield)
     (recur))))
 
-(defn restart_child (spec:ChildSpec)
+(defn restart-child (spec:ChildSpec)
   "Apply restart strategy"
   ;; Check restart limits
-  (when (exceeded_restart_limit? spec)
-    (emit_agc_code "AGC-SUP100" "Max restarts exceeded")
-    (crash_supervisor))
+  (when (exceeded-restart-limit? spec)
+    (emit-agc-code "AGC-SUP100" "Max restarts exceeded")
+    (crash-supervisor))
   
   ;; Spawn child
   (let pid (spawn (. spec start) (array) "normal" (. spec capabilities)))
-  (map_set! children (. spec id) pid)
+  (map-set! children (. spec id) pid)
   
   ;; Record restart
-  (update_restart_count! (. spec id)))
+  (update-restart-count! (. spec id)))
 ```
 
 ### 7.2 Registries
@@ -1933,23 +1933,23 @@ Simple name->pid mapping:
   (loop
     (receive
       ((array "register" name pid)
-        (map_set! names name pid))
+        (map-set! names name pid))
       
       ((array "unregister" name)
-        (map_delete! names name))
+        (map-delete! names name))
       
       ((array "whereis" name from)
-        (send from (map_get names name))))
+        (send from (map-get names name))))
     
     (yield)
     (recur)))
 ```
 
-### 7.3 Behaviors (gen_server equivalent)
+### 7.3 Behaviors (gen-server equivalent)
 
 ```t2
 (defmacro behavior (name protocol params & body)
-  "Define a behavior (gen_server style)"
+  "Define a behavior (gen-server style)"
   
   `(task ~name ~params
      ("protocol" ~protocol)
@@ -1968,7 +1968,7 @@ All OTP-level constructs emit appropriate AGC codes and integrate with the debug
 
 1. **Implement**: Build `src/kernel.t2` with Scheduler and Task classes
 2. **Implement**: Build `src/primitives.t2` with spawn, send, receive, effect
-3. **Test**: Write ping_pong example (from EXAMPLES.md)
+3. **Test**: Write ping-pong example (from EXAMPLES.md)
 4. **Implement**: Pattern matching in `src/pattern.t2`
 5. **Test**: Selective receive examples
 6. **Implement**: Capabilities in `src/capabilities.t2`

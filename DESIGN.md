@@ -485,6 +485,8 @@ This is the **foundation** on which t2‑agc‑otp and Dlite build.
 
 ---
 
+# 13. Addendum: Prioritized mailboxes
+
 Yes — priority‑aware mailbox load shedding is not only feasible, it fits the t2‑agc model perfectly.
 It should be:
 
@@ -616,31 +618,8 @@ Avoids unbounded heap growth in a shared‑heap environment.
 
 Yes — t2‑agc should support priority‑aware mailbox load shedding at the core level.
 
-It’s:
+# 14. Addendum: Protocol mismatch detection
 
-    simple
-    powerful
-    predictable
-    analyzable
-    and directly addresses the real‑world failure modes highlighted in the HN thread
-
-If you want, I can now:
-
-    draft the core‑doc section for mailbox shedding
-    update the OTP doc with behavior‑level policies
-    update the Dlite doc with static analysis rules
-    or sketch how shedding appears in the woven timeline
-
-Raoul Duke <raould@gmail.com>
-	
-Sat, Mar 14, 5:18 PM (18 hours ago)
-	
-	
-to me
-
-You’re circling exactly the right problem: protocol versioning is where most actor systems quietly rot over time, and the protobuf‑style “field numbers forever” approach is… let’s say not aligned with the t2‑agc philosophy of explicitness, analyzability, and runtime clarity.
-
-Let’s walk through this carefully, because the design space is subtle — and the choice you make here will shape the entire long‑term evolution of the ecosystem.
 🌟 The core insight
 
 t2‑agc protocols are runtime objects, not compile‑time schemas.
