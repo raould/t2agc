@@ -9,7 +9,7 @@
     
     (constructor ()
       (set (. this tasks) (object))
-      (set (. this runQueues) (object (~high (array)) (~normal (array)) (~low (array))))
+      (set (. this runQueues) (object ("high" (array)) ("normal" (array)) ("low" (array))))
       (set (. this pidCounter) 0)
       (set (. this currentTask) null))
 
@@ -35,29 +35,29 @@
       
       ((. (. task mailbox) push) msg)
       
-      (if (=== (. task status) ~waiting)
+      (if (=== (. task status) "waiting")
           (block
             (let waitingFor (. task waitingFor))
-            (if (=== waitingFor ~receive)
+            (if (=== waitingFor "receive")
                 (block
                    (let consumedMsg ((. (. task mailbox) shift)))
                    (set (. task nextInput) consumedMsg)
-                   (set (. task status) ~runnable)
+                   (set (. task status) "runnable")
                    ((. this schedule) task))
-                (if (=== waitingFor ~new-message)
+                (if (=== waitingFor "new-message")
                     (block
-                       (set (. task status) ~runnable)
+                       (set (. task status) "runnable")
                        ((. this schedule) task))))
             ))
       (return true))
 
     (method pickNextTask ()
       (let queues (. this runQueues))
-      (let highQ (. queues ~high))
+      (let highQ (. queues "high"))
       (if (> (. highQ length) 0) (return ((. highQ shift))))
-      (let normalQ (. queues ~normal))
+      (let normalQ (. queues "normal"))
       (if (> (. normalQ length) 0) (return ((. normalQ shift))))
-      (let lowQ (. queues ~low))
+      (let lowQ (. queues "low"))
       (if (> (. lowQ length) 0) (return ((. lowQ shift))))
       (return null))
 
@@ -80,14 +80,14 @@
         (let nextResult ((. (. task gen) next) input))
         
         (if (. nextResult done)
-            (block (set (. task status) ~done))
+            (block (set (. task status) "done"))
             (block
                (let yieldVal (. nextResult value))
                ((. this handleYield) task yieldVal)))
                
         (catch e
            (block
-             (set (. task status) ~crashed)
+             (set (. task status) "crashed")
              ((. console error) (+ "Kernel Panic (Task Crash): " (. task id) " " e) e)))))
 
     (method handleYield (task yieldVal)
@@ -95,7 +95,7 @@
            (block
               (let type (. yieldVal type))
               
-              (if (=== type ~receive)
+              (if (=== type "receive")
                   (block
                     (if (> (. (. task mailbox) length) 0)
                         (block
@@ -103,27 +103,27 @@
                            (set (. task nextInput) msg)
                            ((. this schedule) task))
                         (block
-                           (set (. task status) ~waiting)
-                           (set (. task waitingFor) ~receive))))
+                           (set (. task status) "waiting")
+                           (set (. task waitingFor) "receive"))))
                   
-                  (if (=== type ~wait-for-new-message)
+                  (if (=== type "wait-for-new-message")
                       (block
-                         (set (. task status) ~waiting)
-                         (set (. task waitingFor) ~new-message))
+                         (set (. task status) "waiting")
+                         (set (. task waitingFor) "new-message"))
                       
-                      (if (=== type ~get-mailbox)
+                      (if (=== type "get-mailbox")
                           (block
                              (set (. task nextInput) (. task mailbox))
                              ((. this schedule) task))
                              
-                          (if (=== type ~consume-message)
+                          (if (=== type "consume-message")
                               (block
                                  (let idx (. yieldVal index))
                                  (if (and (>= idx 0) (< idx (. (. task mailbox) length)))
                                      ((. (. task mailbox) splice) idx 1))
                                  ((. this schedule) task))
                                  
-                              (if (=== type ~effect)
+                              (if (=== type "effect")
                                   (block
                                      (let cap (. yieldVal capability))
                                      ;; Check correct capability
@@ -142,10 +142,10 @@
                                               ;; If promise, handle like async?
                                               (if (and result (instanceof result Promise))
                                                   (block
-                                                     (set (. task status) ~waiting)
+                                                     (set (. task status) "waiting")
                                                      ((. result then) (fn (val)
                                                         (set (. task nextInput) val)
-                                                        (set (. task status) ~runnable)
+                                                        (set (. task status) "runnable")
                                                         ((. this schedule) task)
                                                         (return val)))
                                                      ((. result catch) (fn (err)
@@ -154,7 +154,7 @@
                                                         ;; Resume with exception?
                                                         ;; generator.throw(err) not implemented in executeSlice yet loop.
                                                         ;; TODO: Handle throw
-                                                        (set (. task status) ~crashed)
+                                                        (set (. task status) "crashed")
                                                         ((. console error) "Async Effect Error" err)
                                                      )))
                                                   (block
@@ -163,12 +163,12 @@
                                                      ((. this schedule) task)))
                                             (catch err
                                                 (block
-                                                  (set (. task status) ~crashed) ;; Or throw back?
+                                                  (set (. task status) "crashed") ;; Or throw back?
                                                   ((. console error) "Effect Error" err))))
                                          )
                                          (block
                                             ;; Capability violation!
-                                            (set (. task status) ~crashed)
+                                            (set (. task status) "crashed")
                                             ((. console error) "Capability Violation" (. task id) cap))))
                                   
                                   ;; Unknown object yield, reschedule

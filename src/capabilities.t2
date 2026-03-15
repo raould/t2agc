@@ -13,7 +13,7 @@
   
   ;; Standard Capabilities
   (export (const consoleCap (new Capability "console" (fn (op args)
-     (if (=== op ~log) ((. console log apply) console args))
-     (if (=== op ~error) ((. console error apply) console args))
+     (if (=== op "log") ((. console log apply) console args))
+     (if (=== op "error") ((. console error apply) console args))
   ))))
 )

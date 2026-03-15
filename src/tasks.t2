@@ -1,28 +1,30 @@
 (program
-  (type 
-  (export (type TaskStatus (union ("runnable") ("waiting") ("done") ("crashe"))))
+  (export (type Priority (union (tlit "low") (tlit "normal") (tlit "high"))))
+  (export (type TaskStatus (union (tlit "runnable") (tlit "waiting") (tlit "done") (tlit "crashed"))))
   (export (class Task
-    (field (id))
-    (field (priority))
-    (field (status: TaskStatus))
-    (field (gen))       ;; The generator iterator
-    (field (mailbox))   ;; Array of messages
-    (field (budget))    ;; Reduction budget
-    (field (history))   ;; Array of history events
-    (field (nextInput)) ;; Value to pass to .next()
-    (field (waitingFor)) ;; ~receive or ~new-message
-    (field (capabilities)) ;; Set of capabilities
+    (class-body
+      (field (id: string))
+      (field (priority: Priority))
+      (field (status: TaskStatus))
+      (field (gen: unknown))       ;; TODO: The generator iterator
+      (field (mailbox: (type-array unknown)))   ;; Array of TODO: messages
+      (field (budget: number))    ;; Reduction budget
+      (field (history: (type-array unknown)))   ;; Array of TODO: history events
+      (field (nextInput: unknown)) ;; TODO: Value to pass to .next()
+      (field (waitingFor)) ;; "receive" or "new-message"
+      (field (capabilities)) ;; Set of TODO: capabilities
 
-    (constructor (id gen priority)
-      (set (. this id) id)
-      (set (. this gen) gen)
-      (set (. this priority) (ternary priority priority ~normal))
-      (set (. this status) "runnable")
-      (set (. this mailbox) (array))
-      (set (. this budget) 200)
-      (set (. this history) (array))
-      (set (. this nextInput) undefined)
-      (set (. this waitingFor) null)
-      (set (. this capabilities) (array)))
+      (constructor ((id:string) (gen) (priority:Priority))
+        (set! (. this id) id)
+        (set! (. this gen) gen)
+        (set! (. this priority) (ternary priority priority "normal"))
+        (set! (. this status) "runnable")
+        (set! (. this mailbox) (array))
+        (set! (. this budget) 200)
+        (set! (. this history) (array))
+        (set! (. this nextInput) undefined)
+        (set! (. this waitingFor) null)
+        (set! (. this capabilities) (array)))
+    )
   ))
 )

@@ -2,6 +2,9 @@
   (export (const protocols (object)))
 
   (export (fn defProtocol (name schema)
+     (if (!= (index protocols name) undefined)
+      (throw (new Error (+ "protocol" name "already exists"))))
      (set (index protocols name) schema)
+     ;; todo: logging system.
      ((. console log) (+ "Defined protocol: " name))))
 )

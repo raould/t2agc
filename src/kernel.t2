@@ -20,5 +20,5 @@
 
   (export (fn effect (cap op args)
      ;; Helper to create effect object
-     (return (object (~type ~effect) (~capability cap) (~op op) (~args args)))))
+     (return (object ("type" "effect") ("capability" cap) ("op" op) ("args" args)))))
 )

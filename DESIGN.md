@@ -482,3 +482,354 @@ t2‑agc provides:
 ### ✔️ A tiny, explicit, predictable runtime  
 
 This is the **foundation** on which t2‑agc‑otp and Dlite build.
+
+---
+
+Yes — priority‑aware mailbox load shedding is not only feasible, it fits the t2‑agc model perfectly.
+It should be:
+
+    in the core (because mailboxes are core)
+    configurable per task
+    visible in AGC diagnostics
+    analyzable by Dlite
+    integrated with priority buckets
+
+This gives you a principled, actor‑native way to prevent runaway memory and latency cascades.
+🌿 Why this matters
+
+Mailbox overload is one of the most common real‑world failure modes in Erlang systems.
+People in the HN thread even call it out:
+
+    “A bad mailbox backlog can turn local slowness into cluster‑wide pain…”
+
+In t2‑agc, where:
+
+    the heap is shared
+    GC is global
+    tasks are cooperative
+    selective receive can scan the whole mailbox
+
+…unbounded or undifferentiated mailboxes are even more dangerous.
+
+So priority‑aware load shedding is a natural fit.
+🌳 What priority‑aware load shedding means
+
+Each message has:
+
+    a protocol tag
+    a shape
+    and (implicitly) a priority category based on the sender’s task priority bucket
+
+We can use that to decide:
+
+    which messages to keep
+    which to drop
+    which to escalate
+    which to reject
+
+This is not Erlang’s model — it’s better suited to a JS runtime.
+🌲 Proposed design
+1. Each task declares a mailbox policy
+
+Something like:
+
+(task MyServer
+  (:max-mailbox 500)
+  (:shed-policy :drop-lowest-priority)
+  ...)
+
+Policies could include:
+
+    :drop-lowest-priority
+    :drop-oldest
+    :drop-newest
+    :reject
+    :escalate
+    :block-sender
+
+But the new one is:
+:drop-lowest-priority
+
+When mailbox is full:
+
+    drop messages from idle first
+    then low
+    then normal
+    never drop high or critical unless explicitly allowed
+
+This is exactly how real‑time systems behave.
+2. Priority is inherited from the sender
+
+If a low‑priority task sends a message to a normal‑priority server, that message is marked low.
+
+This gives you:
+
+    natural backpressure
+    fairness
+    protection for critical paths
+
+3. AGC‑coded diagnostics
+
+When shedding occurs:
+
+AGC-M050 mailbox shedding: dropped 12 low-priority messages
+AGC-M051 mailbox shedding: dropped 1 normal-priority message
+AGC-M052 mailbox shedding: critical message dropped (escalation)
+
+These appear in:
+
+    task history
+    system history
+    woven timelines
+
+This makes overload visible.
+4. Dlite static analysis
+
+Dlite can check:
+✔️ tasks that receive high‑priority messages but shed them
+✔️ tasks that shed messages from protocols that require reliability
+✔️ tasks that shed messages but never handle the overflow case
+✔️ tasks that have no mailbox policy (COV warning)
+✔️ tasks that shed messages from higher‑priority senders (error)
+
+This is incredibly useful.
+🌵 Why this fits the t2‑agc philosophy
+✔️ Explicit
+
+Developers must declare policies.
+✔️ Deterministic
+
+Shedding rules are predictable and reproducible.
+✔️ Debuggable
+
+AGC codes + woven timelines show exactly what happened.
+✔️ Analyzable
+
+Dlite can reason about mailbox behavior statically.
+✔️ Safe
+
+Prevents runaway memory and latency cascades.
+✔️ JS‑appropriate
+
+Avoids unbounded heap growth in a shared‑heap environment.
+🌞 Final recommendation
+
+Yes — t2‑agc should support priority‑aware mailbox load shedding at the core level.
+
+It’s:
+
+    simple
+    powerful
+    predictable
+    analyzable
+    and directly addresses the real‑world failure modes highlighted in the HN thread
+
+If you want, I can now:
+
+    draft the core‑doc section for mailbox shedding
+    update the OTP doc with behavior‑level policies
+    update the Dlite doc with static analysis rules
+    or sketch how shedding appears in the woven timeline
+
+Raoul Duke <raould@gmail.com>
+	
+Sat, Mar 14, 5:18 PM (18 hours ago)
+	
+	
+to me
+
+You’re circling exactly the right problem: protocol versioning is where most actor systems quietly rot over time, and the protobuf‑style “field numbers forever” approach is… let’s say not aligned with the t2‑agc philosophy of explicitness, analyzability, and runtime clarity.
+
+Let’s walk through this carefully, because the design space is subtle — and the choice you make here will shape the entire long‑term evolution of the ecosystem.
+🌟 The core insight
+
+t2‑agc protocols are runtime objects, not compile‑time schemas.
+That means versioning must be:
+
+    explicit
+    visible
+    analyzable
+    checkable
+    and not dependent on codegen or schema registries
+
+This already rules out 90% of protobuf‑style solutions.
+
+You’re also correct that:
+
+    we do not want dynamic message upgrading at runtime
+    we do not want implicit compatibility
+    we do not want “best effort” decoding
+    we do not want field‑number gymnastics
+
+So the question becomes:
+
+    How do we detect protocol mismatches without introducing a schema bureaucracy?
+
+🌿 The two options you proposed
+
+Let’s examine them in the context of t2‑agc’s design goals.
+Option A — A version string field in the protocol metadata
+
+This is simple and explicit:
+
+(defprotocol Counter
+  (:version "v1.2.0")
+  (:inc n)
+  (:get from)
+  (:reset))
+
+Pros
+
+    human‑readable
+    tools can compare versions
+    Dlite can warn on mismatches
+    debugging tools can show version info
+    supports semantic versioning or arbitrary strings
+    no runtime overhead
+
+Cons
+
+    version strings don’t guarantee structural compatibility
+    developers can lie
+    tools must interpret version semantics
+
+Still: this is a good baseline.
+Option B — A structural hash of the protocol
+
+This is more rigorous:
+
+    compute a hash of the message shapes
+    embed it in the protocol metadata
+    sender and receiver compare hashes
+    mismatch → warning or error
+
+Pros
+
+    guarantees structural identity
+    no human interpretation
+    perfect for Dlite
+    perfect for debugging
+    perfect for hot‑swap safety
+    zero ambiguity
+
+Cons
+
+    hash changes on any structural change
+    requires deterministic hashing of IR
+    requires runtime comparison logic
+
+But: this is the most principled solution.
+🌳 The real answer: use both
+
+This is the sweet spot:
+✔️ A human‑meaningful version string
+
+For documentation, debugging, and static tooling.
+✔️ A machine‑checked structural hash
+
+For correctness, safety, and hot‑swap validation.
+
+Together they give you:
+
+    human intent
+    machine truth
+    analyzability
+    runtime safety
+    Dlite integration
+    zero ambiguity
+
+This is exactly how Git works:
+
+    human‑meaningful tags
+    machine‑meaningful hashes
+
+It’s a proven pattern.
+🌲 How this fits into t2‑agc
+1. Protocol metadata includes both fields
+
+{
+  "protocol": "Counter",
+  "version": "v1.2.0",
+  "hash": "sha256:abc123...",
+  "messages": [...]
+}
+
+2. Dlite uses both
+
+    version string → warn on mismatches
+    hash → error on structural mismatch
+    coverage → warn on unanalyzable dynamic messages
+
+3. Runtime uses the hash only
+
+    sender attaches protocol hash
+    receiver compares
+    mismatch → AGC‑coded warning or escalation
+
+4. Hot‑swap uses both
+
+    version string → human‑visible
+    hash → compatibility check
+
+5. No dynamic upgrading
+
+This is important.
+t2‑agc should not attempt:
+
+    schema evolution
+    field renaming
+    optional fields
+    backward compatibility logic
+
+If you want a new protocol, you create:
+
+Counter@v2
+
+Just like you version behaviors.
+🌵 Why this is better than protobuf‑style evolution
+
+Protobuf tries to solve:
+
+    cross‑team schema drift
+    long‑term backward compatibility
+    partial upgrades
+    rolling deployments
+    multi‑language codegen
+
+t2‑agc is solving a different problem:
+
+    local actor protocols
+    explicit message shapes
+    static analysis
+    hot‑swap safety
+    debugging clarity
+
+We don’t need:
+
+    field numbers
+    optional fields
+    reserved fields
+    schema registries
+    implicit compatibility
+
+We need:
+
+    explicitness
+    analyzability
+    correctness
+
+Hashes + version strings give you that.
+🌞 Final recommendation
+
+Yes — protocols should carry both a version string and a structural hash.
+
+This gives you:
+✔️ human‑meaningful versioning
+✔️ machine‑checked structural identity
+✔️ Dlite compatibility checking
+✔️ runtime mismatch detection
+✔️ hot‑swap safety
+✔️ zero ambiguity
+✔️ no protobuf‑style schema bureaucracy
+
+It’s the cleanest, most principled solution for an actor‑native, analyzable concurrency model.

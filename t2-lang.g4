@@ -338,11 +338,11 @@ typeExpr
     ;
 
 typeUnion
-    : LPAREN UNION typeExpr typeExpr+ RPAREN
+    : LPAREN UNION typeExpr+ RPAREN
     ;
 
 typeIntersection
-    : LPAREN INTERSECT typeExpr typeExpr+ RPAREN
+    : LPAREN INTERSECT typeExpr+ RPAREN
     ;
 
 typeArray
