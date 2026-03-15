@@ -14,14 +14,19 @@ This document outlines the staged implementation plan for the `t2-agc` runtime, 
 The `Task` class represents a single cooperative execution unit. Must include ALL fields from DESIGN.md:
 
 ```t2
+;; Type definitions for Task
+(export (type Priority (tlit "critical") (tlit "high") (tlit "normal") (tlit "low") (tlit "idle")))
+(export (type TaskStatus (tlit "runnable") (tlit "waiting") (tlit "done") (tlit "crashed")))
+(export (type MailboxOverflowPolicy (tlit "drop-oldest") (tlit "drop-newest") (tlit "reject") (tlit "escalate") (tlit "block-sender")))
+
 (class Task
   ;; Identity
   (field (id:number))              ; Unique integer PID
   (field (name:string))            ; Optional symbolic name for debugging
   
   ;; Execution state
-  (field (priority:string))  ; "critical" | "high" | "normal" | "low" | "idle"
-  (field (status:string))    ; "runnable" | "waiting" | "done" | "crashed"
+  (field (priority:Priority))
+  (field (status:TaskStatus))
   (field (gen:Generator))    ; Generator function* instance
   (field (budget:number))    ; Reductions remaining in current slice
   (field (initial_budget:number)) ; Reset value for budget
@@ -29,7 +34,7 @@ The `Task` class represents a single cooperative execution unit. Must include AL
   ;; Mailbox
   (field (mailbox:array))                 ; Array of messages (FIFO)
   (field (mailbox_max:number))            ; Max mailbox size
-  (field (mailbox_overflow_policy:string)) ; "drop-oldest" | "drop-newest" | "reject" | "escalate" | "block-sender"
+  (field (mailbox_overflow_policy:MailboxOverflowPolicy))
   (field (waiting_patterns:array))        ; Patterns this task is waiting for (when status = "waiting")
   
   ;; Capabilities & Effects
@@ -344,7 +349,7 @@ class Scheduler {
 #### 1.3.1 `spawn(fn, args, priority, capabilities)`
 
 ```t2
-(defn spawn (generator_fn:function args:array priority:string capabilities:Set)
+(defn spawn (generator_fn:function args:array priority:Priority capabilities:Set)
   "Create and schedule a new task"
   (let scheduler (get_global_scheduler))
   (let pid (scheduler.next_pid))
@@ -1046,9 +1051,12 @@ Capabilities are **opaque tokens** that grant authority to perform specific effe
 
 **Capability Object:**
 ```t2
+;; Type definition for Capability
+(export (type CapabilityType (tlit "log") (tlit "io") (tlit "timer") (tlit "random") (tlit "shared-blob")))
+
 (class Capability
   (field (id:string))
-  (field (type:string))  ; "log" | "io" | "timer" | "random" | "shared-blob"
+  (field (type:CapabilityType))
   (field (operations:array))  ; Allowed operations
   (field (metadata:object))  ; Additional constraints
 )
@@ -1859,13 +1867,17 @@ pid
 
 **Child Spec Structure:**
 ```t2
+;; Type definitions for ChildSpec
+(export (type RestartPolicy (tlit "permanent") (tlit "transient") (tlit "temporary")))
+(export (type ChildType (tlit "worker") (tlit "supervisor")))
+
 (deftype ChildSpec
   ("id" symbol)
   ("start" function)           ; Function or behavior to spawn
   ("capabilities" (list_of Capability))
-  ("restart_policy" (union "permanent" "transient" "temporary"))
+  ("restart_policy" RestartPolicy)
   ("shutdown_timeout" number)  ; milliseconds
-  ("type" (union "worker" "supervisor")))
+  ("type" ChildType))
 ```
 
 **Supervisor Behavior:**
