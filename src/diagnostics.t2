@@ -1,0 +1,25 @@
+(program
+  (export (const codes (object)))
+  
+  (export (fn defAgcCode (code msg)
+     (set (index codes code) msg)))
+     
+  (export (fn setupDiagnostics (scheduler)
+     (let agc (object))
+     (set (. agc codes) codes)
+     (set (. agc scheduler) scheduler)
+     
+     (set (. agc dumpTask) (fn (pid)
+           (let task (index (. scheduler tasks) pid))
+           (if task
+               (block
+                  ((. console log) (+ "Task Dump: " pid))
+                  ((. console log) "Status:" (. task status))
+                  ((. console log) "Mailbox:" (. task mailbox))
+                  ((. console log) "History:" (. task history)))
+               ((. console error) (+ "Task not found: " pid)))))
+               
+     (set (. global __t2agc__) agc)
+     ((. console log) "AGC Diagnostics Initialized. Access via __t2agc__.")
+  ))
+)

@@ -1,0 +1,7 @@
+(program
+  (export (const protocols (object)))
+
+  (export (fn defProtocol (name schema)
+     (set (index protocols name) schema)
+     ((. console log) (+ "Defined protocol: " name))))
+)

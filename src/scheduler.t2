@@ -1,107 +1,181 @@
 (program
-  (import (object (Task)) "./tasks")
+  (import (class Task) "./tasks")
 
   (export (class Scheduler
     (field (runQueues))
     (field (tasks))
     (field (pidCounter))
     (field (currentTask))
-    (field (yieldReason)) ;; Why did the task yield?
-
+    
     (constructor ()
-      (set (. this tasks) (object)) ;; using object for map
-      ;; runQueues is a object with priority arrays
+      (set (. this tasks) (object))
       (set (. this runQueues) (object (~high (array)) (~normal (array)) (~low (array))))
       (set (. this pidCounter) 0)
-      (set (. this currentTask) null)
-      (set (. this yieldReason) null))
-
-    (method spawn (taskFn args priority)
-      ;; 1. Make ID
-      (set (. this pidCounter) (+ (. this pidCounter) 1))
-      (let pid (. this pidCounter))
-
-      ;; 2. Instantiate generator
-      ;; Using apply to spread args: taskFn.apply(null, args)
-      (let gen ((. taskFn apply) null args))
-
-      ;; 3. Create Task
-      (let task (new Task pid gen priority))
-
-      ;; 4. Register
-      (set (index (. this tasks) pid) task)
-
-      ;; 5. Schedule
-      ((. this schedule) task)
-
-      (return pid))
+      (set (. this currentTask) null))
 
     (method schedule (task)
        (let queue (index (. this runQueues) (. task priority)))
        ((. queue push) task))
 
-    ;; Main run loop
-    (method run ()
-      (while true
-        (let task ((. this nextTask)))
-        (if (not task) (break))
-        
-        (set (. this currentTask) task)
-        ((. this executeTask) task)
-        
-        ;; If task finished or crashed, cleanup.
-        ;; If yielded, it's already rescheduled by executeTask (if runnable).
-        
-        (set (. this currentTask) null)))
+    (method spawn (taskFn args priority)
+      (set (. this pidCounter) (+ (. this pidCounter) 1))
+      (let pid (. this pidCounter))
+      
+      (let gen ((. taskFn apply) null args))
+      
+      (let task (new Task pid gen priority))
+      (set (index (. this tasks) pid) task)
+      ((. this schedule) task)
+      
+      (return pid))
 
-    (method nextTask ()
-      ;; Check High
-      (let highQ (. (. this runQueues) ~high))
+    (method send (pid msg)
+      (let task (index (. this tasks) pid))
+      (if (not task) (return false))
+      
+      ((. (. task mailbox) push) msg)
+      
+      (if (=== (. task status) ~waiting)
+          (block
+            (let waitingFor (. task waitingFor))
+            (if (=== waitingFor ~receive)
+                (block
+                   (let consumedMsg ((. (. task mailbox) shift)))
+                   (set (. task nextInput) consumedMsg)
+                   (set (. task status) ~runnable)
+                   ((. this schedule) task))
+                (if (=== waitingFor ~new-message)
+                    (block
+                       (set (. task status) ~runnable)
+                       ((. this schedule) task))))
+            ))
+      (return true))
+
+    (method pickNextTask ()
+      (let queues (. this runQueues))
+      (let highQ (. queues ~high))
       (if (> (. highQ length) 0) (return ((. highQ shift))))
-      
-      ;; Check Normal
-      (let normalQ (. (. this runQueues) ~normal))
+      (let normalQ (. queues ~normal))
       (if (> (. normalQ length) 0) (return ((. normalQ shift))))
-      
-      ;; Check Low
-      (let lowQ (. (. this runQueues) ~low))
+      (let lowQ (. queues ~low))
       (if (> (. lowQ length) 0) (return ((. lowQ shift))))
-      
       (return null))
 
-    (method executeTask (task)
-      ;; Run generator .next()
-      ;; TODO: Pass injected value if waiting for receive
+    (method run ()
+      (while true
+         (let task ((. this pickNextTask)))
+         (if (not task) (break))
+         
+         (set (. this currentTask) task)
+         ((. this executeSlice) task)
+         
+         (set (. this currentTask) null)))
+
+    (method executeSlice (task)
       (try
-        (let nextVal ((. (. task gen) next))) ;; { done: bool, value: any }
+        (let input (. task nextInput))
+        (set (. task nextInput) undefined)
+        (set (. task waitingFor) null)
+
+        (let nextResult ((. (. task gen) next) input))
         
-        (if (. nextVal done)
-            (begin 
-               (set (. task status) ~done)
-               ;; Remove from tasks map? Or keep for inspection?
-               ;; For now keep.
-               (return ~done))
-            (begin
-               ;; Task yielded. Analyze value.
-               ((. this handleYield) task (. nextVal value))
-               (return ~yielded)))
+        (if (. nextResult done)
+            (block (set (. task status) ~done))
+            (block
+               (let yieldVal (. nextResult value))
+               ((. this handleYield) task yieldVal)))
+               
         (catch e
-           (begin
+           (block
              (set (. task status) ~crashed)
-             ;; Log error
-             ((. console error) "Task crashed" (. task id) e)
-             (return ~crashed)))))
+             ((. console error) (+ "Kernel Panic (Task Crash): " (. task id) " " e) e)))))
 
     (method handleYield (task yieldVal)
-       ;; If yieldVal is null/undefined, it's a simple cooperative yield.
-       (if (or (=== yieldVal null) (=== yieldVal undefined))
-           (begin
-             ;; Reschedule immediately by pushing to back of queue
-              ((. this schedule) task))
-           (begin
-             ;; Structured yield
-             ;; TODO: Implement :receive, :sleep, etc.
-             ;; For now, just reschedule everything.
+       (if (and yieldVal (=== (typeof yieldVal) "object") (. yieldVal type))
+           (block
+              (let type (. yieldVal type))
+              
+              (if (=== type ~receive)
+                  (block
+                    (if (> (. (. task mailbox) length) 0)
+                        (block
+                           (let msg ((. (. task mailbox) shift)))
+                           (set (. task nextInput) msg)
+                           ((. this schedule) task))
+                        (block
+                           (set (. task status) ~waiting)
+                           (set (. task waitingFor) ~receive))))
+                  
+                  (if (=== type ~wait-for-new-message)
+                      (block
+                         (set (. task status) ~waiting)
+                         (set (. task waitingFor) ~new-message))
+                      
+                      (if (=== type ~get-mailbox)
+                          (block
+                             (set (. task nextInput) (. task mailbox))
+                             ((. this schedule) task))
+                             
+                          (if (=== type ~consume-message)
+                              (block
+                                 (let idx (. yieldVal index))
+                                 (if (and (>= idx 0) (< idx (. (. task mailbox) length)))
+                                     ((. (. task mailbox) splice) idx 1))
+                                 ((. this schedule) task))
+                                 
+                              (if (=== type ~effect)
+                                  (block
+                                     (let cap (. yieldVal capability))
+                                     ;; Check correct capability
+                                     (let caps (. task capabilities))
+                                     ;; Simple check: caps.includes(cap)
+                                     ;; Wait, caps is Array.
+                                     (if (>= ((. caps indexOf) cap) 0)
+                                         (block
+                                            ;; Perform effect
+                                            (try
+                                              (let result ((. cap perform) (. yieldVal op) (. yieldVal args)))
+                                              
+                                              ;; Handle Promise if strictly needed, or assume synchronous for now?
+                                              ;; "Goal: Enforce safety ... side effects."
+                                              ;; Assuming sync for basic console/etc.
+                                              ;; If promise, handle like async?
+                                              (if (and result (instanceof result Promise))
+                                                  (block
+                                                     (set (. task status) ~waiting)
+                                                     ((. result then) (fn (val)
+                                                        (set (. task nextInput) val)
+                                                        (set (. task status) ~runnable)
+                                                        ((. this schedule) task)
+                                                        (return val)))
+                                                     ((. result catch) (fn (err)
+                                                        ;; Inject error?
+                                                        ;; For now, just crash task or throw on resume?
+                                                        ;; Resume with exception?
+                                                        ;; generator.throw(err) not implemented in executeSlice yet loop.
+                                                        ;; TODO: Handle throw
+                                                        (set (. task status) ~crashed)
+                                                        ((. console error) "Async Effect Error" err)
+                                                     )))
+                                                  (block
+                                                     ;; Synchronous result
+                                                     (set (. task nextInput) result)
+                                                     ((. this schedule) task)))
+                                            (catch err
+                                                (block
+                                                  (set (. task status) ~crashed) ;; Or throw back?
+                                                  ((. console error) "Effect Error" err))))
+                                         )
+                                         (block
+                                            ;; Capability violation!
+                                            (set (. task status) ~crashed)
+                                            ((. console error) "Capability Violation" (. task id) cap))))
+                                  
+                                  ;; Unknown object yield, reschedule
+                                  ((. this schedule) task)))))))
+           )
+           (block
+             ;; Simple yield or unknown value
              ((. this schedule) task))))
   ))
 )

@@ -1,12 +1,17 @@
 (program
+  (type 
+  (export (type TaskStatus (union (~runnable) (~waiting) (~done) (~crashed)
   (export (class Task
     (field (id))
     (field (priority))
-    (field (status))    ;; ~runnable, ~waiting, ~done, ~crashed
+    (field (status: TaskStatus))    ;; ~runnable, ~waiting, ~done, ~crashed
     (field (gen))       ;; The generator iterator
     (field (mailbox))   ;; Array of messages
     (field (budget))    ;; Reduction budget
     (field (history))   ;; Array of history events
+    (field (nextInput)) ;; Value to pass to .next()
+    (field (waitingFor)) ;; ~receive or ~new-message
+    (field (capabilities)) ;; Set of capabilities
 
     (constructor (id gen priority)
       (set (. this id) id)
@@ -15,6 +20,9 @@
       (set (. this status) ~runnable)
       (set (. this mailbox) (array))
       (set (. this budget) 200)
-      (set (. this history) (array)))
+      (set (. this history) (array))
+      (set (. this nextInput) undefined)
+      (set (. this waitingFor) null)
+      (set (. this capabilities) (array)))
   ))
 )

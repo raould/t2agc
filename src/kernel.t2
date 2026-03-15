@@ -1,8 +1,13 @@
 (program
-  (import (object (Scheduler)) "./scheduler")
+  (import (class Scheduler) "./scheduler")
+  (import (object (setupDiagnostics defAgcCode)) "./diagnostics")
+  (import (class Capability) "./capabilities")
 
   ;; Singleton instance
   (export (const scheduler (new Scheduler)))
+  
+  ;; Initialize Diagnostics
+  (setupDiagnostics scheduler)
 
   (export (fn spawn (fnArg args priority)
      (return ((. scheduler spawn) fnArg args priority))))
@@ -11,6 +16,9 @@
      ((. scheduler run))))
 
   (export (fn send (pid msg)
-     ;; Stub for now
-     ((. console log) "Send not implemented yet" pid msg)))
+     (return ((. scheduler send) pid msg))))
+
+  (export (fn effect (cap op args)
+     ;; Helper to create effect object
+     (return (object (~type ~effect) (~capability cap) (~op op) (~args args)))))
 )
