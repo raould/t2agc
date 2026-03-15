@@ -1,10 +1,10 @@
 (program
   (type 
-  (export (type TaskStatus (union (~runnable) (~waiting) (~done) (~crashed)
+  (export (type TaskStatus (union ("runnable") ("waiting") ("done") ("crashe"))))
   (export (class Task
     (field (id))
     (field (priority))
-    (field (status: TaskStatus))    ;; ~runnable, ~waiting, ~done, ~crashed
+    (field (status: TaskStatus))
     (field (gen))       ;; The generator iterator
     (field (mailbox))   ;; Array of messages
     (field (budget))    ;; Reduction budget
@@ -17,7 +17,7 @@
       (set (. this id) id)
       (set (. this gen) gen)
       (set (. this priority) (ternary priority priority ~normal))
-      (set (. this status) ~runnable)
+      (set (. this status) "runnable")
       (set (. this mailbox) (array))
       (set (. this budget) 200)
       (set (. this history) (array))
