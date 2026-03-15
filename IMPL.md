@@ -21,37 +21,37 @@ The `Task` class represents a single cooperative execution unit. Must include AL
 
 (class Task
   ;; Identity
-  (field (id:number))              ; Unique integer PID
-  (field (name:string))            ; Optional symbolic name for debugging
+  (field (id: number))              ; Unique integer PID
+  (field (name: string))            ; Optional symbolic name for debugging
   
   ;; Execution state
-  (field (priority:Priority))
-  (field (status:TaskStatus))
-  (field (gen:Generator))    ; Generator function* instance
-  (field (budget:number))    ; Reductions remaining in current slice
-  (field (initial_budget:number)) ; Reset value for budget
+  (field (priority: Priority))
+  (field (status: TaskStatus))
+  (field (gen: Generator))    ; Generator function* instance
+  (field (budget: number))    ; Reductions remaining in current slice
+  (field (initial_budget: number)) ; Reset value for budget
   
   ;; Mailbox
-  (field (mailbox:array))                 ; Array of messages (FIFO)
-  (field (mailbox_max:number))            ; Max mailbox size
-  (field (mailbox_overflow_policy:MailboxOverflowPolicy))
-  (field (waiting_patterns:array))        ; Patterns this task is waiting for (when status = "waiting")
+  (field (mailbox: array))                 ; Array of messages (FIFO)
+  (field (mailbox_max: number))            ; Max mailbox size
+  (field (mailbox_overflow_policy: MailboxOverflowPolicy))
+  (field (waiting_patterns: array))        ; Patterns this task is waiting for (when status = "waiting")
   
   ;; Capabilities & Effects
-  (field (capabilities:Set))    ; Set of capability tokens
+  (field (capabilities: Set))    ; Set of capability tokens
   
   ;; Histories (Ring Buffers)
-  (field (history_effects:RingBuffer))      ; Last 100 effect events
-  (field (history_exceptional:RingBuffer))  ; Last 50 exceptional events
-  (field (history_critical:RingBuffer))     ; Last 20 critical events
+  (field (history_effects: RingBuffer))      ; Last 100 effect events
+  (field (history_exceptional: RingBuffer))  ; Last 50 exceptional events
+  (field (history_critical: RingBuffer))     ; Last 20 critical events
   
   ;; Statistics (for diagnostics)
-  (field (created_at:number))
-  (field (total_reductions:number))
-  (field (total_messages_sent:number))
-  (field (total_messages_received:number))
-  (field (mailbox_scan_count:number))          ; Number of selective receive scans
-  (field (total_mailbox_scan_operations:number)) ; Total messages scanned
+  (field (created_at: number))
+  (field (total_reductions: number))
+  (field (total_messages_sent: number))
+  (field (total_messages_received: number))
+  (field (mailbox_scan_count: number))          ; Number of selective receive scans
+  (field (total_mailbox_scan_operations: number)) ; Total messages scanned
 )
 ```
 
@@ -159,35 +159,35 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
 ```t2
 (class Scheduler
   ;; Priority-based run queues (5 levels as per DESIGN.md)
-  (field (run_queues:object))  ; Map of priority -> array of tasks
+  (field (run_queues: object))  ; Map of priority -> array of tasks
   
   ;; Task registry
-  (field (tasks:object))                  ; Map: pid -> Task
-  (field (waiting_tasks:object))          ; Map: pid -> Task (blocked on receive)
-  (field (pid_counter:number))
+  (field (tasks: object))                  ; Map: pid -> Task
+  (field (waiting_tasks: object))          ; Map: pid -> Task (blocked on receive)
+  (field (pid_counter: number))
   
   ;; Current execution state
-  (field (current_task:Task))
-  (field (tick_count:number))
-  (field (running:boolean))
+  (field (current_task: Task))
+  (field (tick_count: number))
+  (field (running: boolean))
   
   ;; System monitoring (for overload detection)
-  (field (total_run_queue_length:number))
-  (field (avg_slice_duration:number))      ; EMA of slice execution time
-  (field (slice_duration_samples:array))
-  (field (overload_threshold_queue_length:number))
-  (field (overload_threshold_slice_ms:number))
+  (field (total_run_queue_length: number))
+  (field (avg_slice_duration: number))      ; EMA of slice execution time
+  (field (slice_duration_samples: array))
+  (field (overload_threshold_queue_length: number))
+  (field (overload_threshold_slice_ms: number))
   
   ;; Global histories
-  (field (orchestrator_history:RingBuffer))
+  (field (orchestrator_history: RingBuffer))
   
   ;; AGC Code emission
-  (field (agc_codes_emitted:array))
+  (field (agc_codes_emitted: array))
   
   ;; Priority order for scheduling
-  (field (priority_order:array))
+  (field (priority_order: array))
   
-  (method schedule (task:Task)
+  (method schedule (task: Task)
     "Add task to appropriate run queue"
     (let priority (. task priority))
     (let queue (get (. this run_queues) priority))
@@ -203,7 +203,7 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
         (return (array_shift queue)))))
     nil)
   
-  (method execute_slice (task:Task)
+  (method execute_slice (task: Task)
     "Execute one slice of a task (up to budget reductions)"
     (set! (. this current_task) task)
     (set! (. task budget) (. task initial_budget))
@@ -238,7 +238,7 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
     
     (set! (. this current_task) nil))
   
-  (method handle_primitive (task:Task primitive:object)
+  (method handle_primitive (task: Task primitive:object)
     "Handle yielded primitives from generator"
     (match primitive
       ((object (type "yield"))
@@ -254,7 +254,7 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
         (this.handle_effect task cap op args))
       
       (_
-        (this.emit_agc_code "AGC-S999" (concat "Unknown primitive: " primitive))
+        (this.emit_agc_code "AGC-S999" (+ "Unknown primitive: " primitive))
         (set! (. task status) "crashed"))))
   
   (method run ()
@@ -283,13 +283,13 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
     "Detect system overload and emit AGC-S100 if needed"
     (when (> (. this total_run_queue_length) (. this overload_threshold_queue_length))
       (this.emit_agc_code "AGC-S100" 
-        (concat "Overload: run queue length " (. this total_run_queue_length))))
+        (+ "Overload: run queue length " (. this total_run_queue_length))))
     
     (when (> (. this avg_slice_duration) (. this overload_threshold_slice_ms))
       (this.emit_agc_code "AGC-S100"
-        (concat "Overload: avg slice duration " (. this avg_slice_duration) "ms"))))
+        (+ "Overload: avg slice duration " (. this avg_slice_duration) "ms"))))
   
-  (method record_slice_duration (duration:number)
+  (method record_slice_duration (duration: number)
     "Update EMA of slice duration"
     (let alpha 0.1)
     (set! (. this avg_slice_duration)
@@ -304,7 +304,7 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
       task: (if (. this current_task) (. this current_task id) nil)
     })
     (array_push (. this agc_codes_emitted) event)
-    (console.error (concat "[" code "] " message))
+    (console.error (+ "[" code "] " message))
     (when (. this current_task)
       (call (. this current_task recordCritical) code message)))
 )
@@ -349,7 +349,7 @@ class Scheduler {
 #### 1.3.1 `spawn(fn, args, priority, capabilities)`
 
 ```t2
-(defn spawn (generator_fn:function args:array priority:Priority capabilities:Set)
+(defn spawn (generator_fn: function args:array priority:Priority capabilities:Set)
   "Create and schedule a new task"
   (let scheduler (get_global_scheduler))
   (let pid (scheduler.next_pid))
@@ -445,7 +445,7 @@ Each task declares mailbox behavior via options (see Task structure in 1.1.1):
 **Full Algorithm:**
 
 ```t2
-(defn send (target_pid:number msg:any)
+(defn send (target_pid: number msg:any)
   "Send a message to a task's mailbox"
   (let scheduler (get_global_scheduler))
   (let sender (. scheduler current_task))
@@ -456,7 +456,7 @@ Each task declares mailbox behavior via options (see Task structure in 1.1.1):
   (when (not target)
     ;; Target doesn't exist - emit warning
     (scheduler.emit_agc_code "AGC-M050" 
-      (concat "Send to non-existent pid: " target_pid))
+      (+ "Send to non-existent pid: " target_pid))
     (return nil))
   
   ;; Check mailbox capacity
@@ -469,12 +469,12 @@ Each task declares mailbox behavior via options (see Task structure in 1.1.1):
         (array_shift (. target mailbox))  ; Remove oldest
         (array_push (. target mailbox) msg)
         (scheduler.emit_agc_code "AGC-M010" 
-          (concat "Mailbox overflow (drop-oldest) for task " target_pid)))
+          (+ "Mailbox overflow (drop-oldest) for task " target_pid)))
       
       ("drop-newest"
         ;; Do nothing - drop the new message
         (scheduler.emit_agc_code "AGC-M010"
-          (concat "Mailbox overflow (drop-newest) for task " target_pid)))
+          (+ "Mailbox overflow (drop-newest) for task " target_pid)))
       
       ("reject"
         ;; Send error back to sender
@@ -482,13 +482,13 @@ Each task declares mailbox behavior via options (see Task structure in 1.1.1):
           (array_push (. sender mailbox) 
             (array "mailbox_full" target_pid)))
         (scheduler.emit_agc_code "AGC-M010"
-          (concat "Mailbox overflow (reject) for task " target_pid)))
+          (+ "Mailbox overflow (reject) for task " target_pid)))
       
       ("escalate"
         ;; Crash the target task
         (set! (. target status) "crashed")
         (scheduler.emit_agc_code "AGC-M010"
-          (concat "Mailbox overflow (escalate) - crashing task " target_pid))
+          (+ "Mailbox overflow (escalate) - crashing task " target_pid))
         (target.recordExceptional "mailbox_overflow" (object (sender (if sender (. sender id) nil))))))
     
     ;; Mailbox has space - append message
@@ -534,7 +534,7 @@ function send(targetPid, msg) {
   
   const target = scheduler.tasks.get(targetPid);
   if (!target) {
-    scheduler.emitAGCCode('AGC-M050', `Send to non-existent pid: ${targetPid}`);
+    scheduler.emitAGCCode('AGC-M050', `Send to non-existent pid:  ${targetPid}`);
     return;
   }
   
@@ -553,14 +553,14 @@ function send(targetPid, msg) {
         break;
       case 'reject':
         if (sender) {
-          sender.mailbox.push({ tag: 'mailbox_full', targetPid });
+          sender.mailbox.push({ tag:  'mailbox_full', targetPid });
         }
         scheduler.emitAGCCode('AGC-M010', `Mailbox overflow (reject) for task ${targetPid}`);
         break;
       case 'escalate':
         target.status = 'crashed';
         scheduler.emitAGCCode('AGC-M010', `Mailbox overflow (escalate) - crashing task ${targetPid}`);
-        target.recordExceptional('mailbox_overflow', { sender: sender?.id });
+        target.recordExceptional('mailbox_overflow', { sender:  sender?.id });
         break;
     }
   } else {
@@ -589,7 +589,7 @@ function send(targetPid, msg) {
       target.waitingPatterns = null;
       scheduler.schedule(target);
       
-      target.recordExceptional('woken_by_message', { sender: sender?.id });
+      target.recordExceptional('woken_by_message', { sender:  sender?.id });
     }
   }
 }
@@ -611,7 +611,7 @@ For basic receive (just pop the first message):
 **Scheduler handling of `"receive"` primitive:**
 
 ```t2
-(method handle_receive (task:Task patterns:array)
+(method handle_receive (task: Task patterns:array)
   "Handle receive primitive - may block task"
   
   (if (> (length (. task mailbox)) 0)
@@ -668,13 +668,13 @@ handleReceive(task, patterns) {
 The scheduler should periodically check for mailbox pathologies:
 
 ```t2
-(method check_mailbox_health (task:Task)
+(method check_mailbox_health (task: Task)
   "Emit AGC codes for mailbox issues"
   
   ;; AGC-M020: Slow consumer (mailbox growing)
   (when (> (length (. task mailbox)) (* (. task mailbox_max) 0.75))
     (this.emit_agc_code "AGC-M020"
-      (concat "Slow consumer: task " (. task id) " mailbox at " 
+      (+ "Slow consumer: task " (. task id) " mailbox at " 
               (length (. task mailbox)) " messages")))
   
   ;; AGC-M030: Unhandled messages (message stuck too long)
@@ -684,7 +684,7 @@ The scheduler should periodically check for mailbox pathologies:
       (let age (- (timestamp) (. oldest_msg timestamp)))
       (when (> age 5000)  ; 5 seconds
         (this.emit_agc_code "AGC-M031"
-          (concat "Message stuck for " age "ms in task " (. task id))))))
+          (+ "Message stuck for " age "ms in task " (. task id))))))
   
   ;; AGC-M040: Excessive mailbox scanning
   (when (> (. task mailbox_scan_count) 100)
@@ -692,7 +692,7 @@ The scheduler should periodically check for mailbox pathologies:
                          (. task mailbox_scan_count)))
     (when (> avg_scan_ops 50)
       (this.emit_agc_code "AGC-M040"
-        (concat "Excessive mailbox scanning: task " (. task id)
+        (+ "Excessive mailbox scanning: task " (. task id)
                 " avg " avg_scan_ops " ops per scan"))))
 )
 ```
@@ -738,7 +738,7 @@ _                        ; Matches anything, doesn't bind
 **Pattern Matching Algorithm:**
 
 ```t2
-(defn match_pattern (pattern:any value:any bindings:object)
+(defn match_pattern (pattern: any value:any bindings:object)
   "Attempt to match pattern against value. Returns bindings map or nil."
   
   (cond
@@ -852,7 +852,7 @@ In t2-lang, `receive` is a macro that expands into a mailbox scanning loop:
 **Full Algorithm with Reduction Budget:**
 
 ```t2
-(method handle_selective_receive (task:Task patterns:array)
+(method handle_selective_receive (task: Task patterns:array)
   "Scan mailbox for first matching pattern"
   
   ;; Track statistics
@@ -988,7 +988,7 @@ handleSelectiveReceive(task, patterns) {
 Earlier in Stage 2 we showed basic wake-up logic in `send`. Now we refine it for selective receive:
 
 ```t2
-(defn try_match_patterns (msg:any patterns:array)
+(defn try_match_patterns (msg: any patterns:array)
   "Check if message matches any of the waiting patterns"
   (for_each patterns (lambda (pattern_spec)
     (let bindings (match_pattern (. pattern_spec pattern) msg {}))
@@ -1055,10 +1055,10 @@ Capabilities are **opaque tokens** that grant authority to perform specific effe
 (export (type CapabilityType (tlit "log") (tlit "io") (tlit "timer") (tlit "random") (tlit "shared-blob")))
 
 (class Capability
-  (field (id:string))
-  (field (type:CapabilityType))
-  (field (operations:array))  ; Allowed operations
-  (field (metadata:object))  ; Additional constraints
+  (field (id: string))
+  (field (type: CapabilityType))
+  (field (operations: array))  ; Allowed operations
+  (field (metadata: object))  ; Additional constraints
 )
 ```
 
@@ -1131,7 +1131,7 @@ function makeRandomCapability() {
   (receive
     ((array "io_capability" cap)
       ;; Worker now has I/O capability
-      (let data (effect cap "read" "https://example.com"))
+      (let data (effect cap "read" "https: //example.com"))
       (yield))))
 ```
 
@@ -1142,7 +1142,7 @@ function makeRandomCapability() {
 **Full Implementation:**
 
 ```t2
-(defn effect (capability:Capability operation:string & args:array)
+(defn effect (capability: Capability operation:string & args:array)
   "Perform a side-effect with capability authorization"
   
   ;; Yield to scheduler for verification and execution
@@ -1157,13 +1157,13 @@ function makeRandomCapability() {
 **Scheduler's Effect Handler:**
 
 ```t2
-(method handle_effect (task:Task capability:Capability operation:string args:array)
+(method handle_effect (task: Task capability:Capability operation:string args:array)
   "Verify capability and dispatch effect"
   
   ;; 1. Verify task holds the capability
   (when (not (set_contains? (. task capabilities) capability))
     (this.emit_agc_code "AGC-CAP500" 
-      (concat "Task " (. task id) " attempted effect without capability"))
+      (+ "Task " (. task id) " attempted effect without capability"))
     (set! (. task status) "crashed")
     (task.recordCritical "AGC-CAP500" "Unauthorized capability usage")
     (return))
@@ -1171,7 +1171,7 @@ function makeRandomCapability() {
   ;; 2. Verify capability allows this operation
   (when (not (capability.can_perform? operation))
     (this.emit_agc_code "AGC-CAP510"
-      (concat "Capability " (. capability type) " does not support operation " operation))
+      (+ "Capability " (. capability type) " does not support operation " operation))
     (set! (. task status) "crashed")
     (return))
   
@@ -1186,7 +1186,7 @@ function makeRandomCapability() {
     (set! result (this.dispatch_effect capability operation args))
     (catch error
       (this.emit_agc_code "AGC-E001"
-        (concat "Effect failed: " (. error message)))
+        (+ "Effect failed: " (. error message)))
       (task.recordExceptional "effect_error" (object (operation operation) (error error)))))
   
   (let duration (- (timestamp) start_time))
@@ -1194,12 +1194,12 @@ function makeRandomCapability() {
   ;; 5. Check for slow effects
   (when (> duration 100)  ; 100ms threshold
     (this.emit_agc_code "AGC-E050"
-      (concat "Slow effect: " operation " took " duration "ms")))
+      (+ "Slow effect: " operation " took " duration "ms")))
   
   ;; 6. Resume generator with result
   (set! (. task gen) (generator_send (. task gen) result)))
 
-(method dispatch_effect (capability:Capability operation:string args:array)
+(method dispatch_effect (capability: Capability operation:string args:array)
   "Actually perform the effect (calls into JavaScript runtime)"
   
   (match (. capability type)
@@ -1219,18 +1219,18 @@ function makeRandomCapability() {
       (this.effect_shared_blob operation args capability))
     
     (_
-      (throw (Error (concat "Unknown capability type: " (. capability type)))))))
+      (throw (Error (+ "Unknown capability type: " (. capability type)))))))
 
 ;; Effect implementations
 
-(method effect_log (operation:string args:array)
+(method effect_log (operation: string args:array)
   (match operation
     ("info" (console.log "[INFO]" ...args))
     ("warn" (console.warn "[WARN]" ...args))
     ("error" (console.error "[ERROR]" ...args))
     ("debug" (console.debug "[DEBUG]" ...args))))
 
-(method effect_io (operation:string args:array capability:Capability)
+(method effect_io (operation: string args:array capability:Capability)
   (match operation
     ("fetch" 
       (let (url) args)
@@ -1239,7 +1239,7 @@ function makeRandomCapability() {
                  (> (length (. capability metadata allowedHosts)) 0))
         (let host (extract_host url))
         (when (not (includes? (. capability metadata allowedHosts) host))
-          (throw (Error (concat "Host not allowed: " host)))))
+          (throw (Error (+ "Host not allowed: " host)))))
       ;; Perform fetch
       (await (fetch url)))
     
@@ -1252,7 +1252,7 @@ function makeRandomCapability() {
       (let (path data) args)
       ...)))
 
-(method effect_timer (operation:string args:array)
+(method effect_timer (operation: string args:array)
   (match operation
     ("sleep"
       (let (ms) args)
@@ -1268,7 +1268,7 @@ function makeRandomCapability() {
       (let (callback ms) args)
       (setInterval callback ms))))
 
-(method effect_random (operation:string args:array)
+(method effect_random (operation: string args:array)
   (match operation
     ("next" () (Math.random))
     ("next_int" (let (max) args) (Math.floor (* (Math.random) max)))
@@ -1305,7 +1305,7 @@ handleEffect(task, capability, operation, args) {
   try {
     result = this.dispatchEffect(capability, operation, args);
   } catch (error) {
-    this.emitAGCCode('AGC-E001', `Effect failed: ${error.message}`);
+    this.emitAGCCode('AGC-E001', `Effect failed:  ${error.message}`);
     task.recordExceptional('effect_error', { operation, error });
     throw error;
   }
@@ -1333,7 +1333,7 @@ dispatchEffect(capability, operation, args) {
     case 'random':
       return this.effectRandom(operation, args);
     default:
-      throw new Error(`Unknown capability type: ${capability.type}`);
+      throw new Error(`Unknown capability type:  ${capability.type}`);
   }
 }
 
@@ -1441,14 +1441,14 @@ Based on DESIGN.md and DLITE.md, here is the full set of AGC diagnostic codes:
 
 ```t2
 (class AGCEvent
-  (field (code:string))           ; e.g. "AGC-M010"
-  (field (message:string))        ; Human-readable description
-  (field (timestamp:number))      ; When emitted
-  (field (task_id:number))        ; Which task (if applicable)
-  (field (context:object))        ; Additional data
+  (field (code: string))           ; e.g. "AGC-M010"
+  (field (message: string))        ; Human-readable description
+  (field (timestamp: number))      ; When emitted
+  (field (task_id: number))        ; Which task (if applicable)
+  (field (context: object))        ; Additional data
 )
 
-(method emit_agc_code (code:string message:string)
+(method emit_agc_code (code: string message:string)
   "Emit an AGC diagnostic code to multiple channels"
   
   (let event (AGCEvent.new code message (timestamp) 
@@ -1468,7 +1468,7 @@ Based on DESIGN.md and DLITE.md, here is the full set of AGC diagnostic codes:
     ((. this current_task) recordCritical code message))
   
   ;; 4. Emit to console (with color coding if possible)
-  (console.error (concat "[" code "] " message))
+  (console.error (+ "[" code "] " message))
   
   ;; 5. Optional: Send to external monitoring system
   (when (. this monitoring_callback)
@@ -1614,9 +1614,9 @@ globalThis.__t2agc__ = {
       
       // Merge all three histories chronologically
       const combined = [
-        ...task.historyEffects.toArray().map(e => ({ ...e, source: 'effect' })),
-        ...task.historyExceptional.toArray().map(e => ({ ...e, source: 'exceptional' })),
-        ...task.historyCritical.toArray().map(e => ({ ...e, source: 'critical' }))
+        ...task.historyEffects.toArray().map(e => ({ ...e, source:  'effect' })),
+        ...task.historyExceptional.toArray().map(e => ({ ...e, source:  'exceptional' })),
+        ...task.historyCritical.toArray().map(e => ({ ...e, source:  'critical' }))
       ];
       
       combined.sort((a, b) => a.timestamp - b.timestamp);
@@ -1630,9 +1630,9 @@ globalThis.__t2agc__ = {
     
     ppTree() {
       // Pretty-print task tree (for supervisors in Stage 7)
-      console.log("Task Tree:");
+      console.log("Task Tree: ");
       for (const [pid, task] of scheduler.tasks) {
-        console.log(`  ${pid}: ${task.name} [${task.status}]`);
+        console.log(`  ${pid}:  ${task.name} [${task.status}]`);
       }
     }
   }
@@ -1649,14 +1649,14 @@ function weaveTimeline(taskIds = null) {
   
   // Add orchestrator events
   events.push(...globalThis.__t2agc__.scheduler.orchestratorHistory.toArray()
-    .map(e => ({ ...e, source: 'orchestrator' })));
+    .map(e => ({ ...e, source:  'orchestrator' })));
   
   // Add task-specific events
   if (taskIds) {
     for (const pid of taskIds) {
       const woven = globalThis.__t2agc__.debug.weaveTaskHistory(pid);
       if (woven) {
-        events.push(...woven.map(e => ({ ...e, taskId: pid })));
+        events.push(...woven.map(e => ({ ...e, taskId:  pid })));
       }
     }
   } else {
@@ -1664,7 +1664,7 @@ function weaveTimeline(taskIds = null) {
     for (const [pid, task] of globalThis.__t2agc__.scheduler.tasks) {
       const woven = globalThis.__t2agc__.debug.weaveTaskHistory(pid);
       if (woven) {
-        events.push(...woven.map(e => ({ ...e, taskId: pid })));
+        events.push(...woven.map(e => ({ ...e, taskId:  pid })));
       }
     }
   }
@@ -1691,12 +1691,12 @@ console.log(taskInfo);
 
 // View recent AGC codes
 const codes = __t2agc__.debug.getAGCCodes(20);
-codes.forEach(c => console.log(`${c.code}: ${c.message}`));
+codes.forEach(c => console.log(`${c.code}:  ${c.message}`));
 
 // Weave a timeline for specific tasks
 const timeline = __t2agc__.debug.weaveTimeline([1, 2, 3]);
 timeline.forEach(event => {
-  console.log(`[${new Date(event.timestamp).toISOString()}] ${event.source}: ${JSON.stringify(event)}`);
+  console.log(`[${new Date(event.timestamp).toISOString()}] ${event.source}:  ${JSON.stringify(event)}`);
 });
 ```
 
@@ -1746,8 +1746,8 @@ The `task` macro provides syntactic sugar for defining tasks:
 (defmacro task (name params & options_and_body)
   "Define a task with options"
   
-  ;; Parse options (keywords starting with :)
-  (let options (take_while (lambda (form) (starts_with? form ":")) options_and_body))
+  ;; Parse options (keywords starting with : )
+  (let options (take_while (lambda (form) (starts_with? form ": ")) options_and_body))
   (let body (drop (length options) options_and_body))
   
   ;; Extract option values
@@ -1756,7 +1756,7 @@ The `task` macro provides syntactic sugar for defining tasks:
   (let on_overflow (or (get_option options "on_overflow") "drop-oldest"))
   
   ;; Generate function definition
-  `(def ~(symbol (concat (string name) "-fn"))
+  `(def ~(symbol (+ (string name) "-fn"))
      (generator_function ~params
        ;; Store metadata for spawn helper
        (do
@@ -1823,17 +1823,17 @@ Defines opaque types with encapsulation:
 (do
   ;; Define backing class
   (class __Counter
-    (field (value:number))
-    (field (__opaque_tag:symbol)))
+    (field (value: number))
+    (field (__opaque_tag: symbol)))
   
   ;; Constructor
-  (defn make_counter (value:number)
+  (defn make_counter (value: number)
     (let instance (new __Counter))
     (set! (. instance value) value)
     instance)
   
   ;; Accessor
-  (defn counter_value (counter_instance:__Counter)
+  (defn counter_value (counter_instance: __Counter)
     (. counter_instance value))
   
   ;; Pattern match helper (checks tag only)
@@ -1886,7 +1886,7 @@ pid
   ("protocol" Supervisor)
   
   (let children (object))      ; Map: child_id -> pid
-  (let restart_counts (object)) ; Map: child_id -> [(timestamp count)]
+  (let restart_counts (object)) ; Map:  child_id -> [(timestamp count)]
   
   (loop
     (receive
@@ -1919,7 +1919,7 @@ pid
     (yield)
     (recur))))
 
-(defn restart_child (spec:ChildSpec)
+(defn restart_child (spec: ChildSpec)
   "Apply restart strategy"
   ;; Check restart limits
   (when (exceeded_restart_limit? spec)
