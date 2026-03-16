@@ -20,39 +20,40 @@ The `Task` class represents a single cooperative execution unit. Must include AL
 (export (type MailboxOverflowPolicy (tlit "drop-oldest") (tlit "drop-newest") (tlit "reject") (tlit "escalate") (tlit "block-sender")))
 
 (class Task
-  ;; Identity
-  (field (id: number))              ; Unique integer PID
-  (field (name: string))            ; Optional symbolic name for debugging
-  
-  ;; Execution state
-  (field (priority: Priority))
-  (field (status: TaskStatus))
-  (field (gen: Generator))    ; Generator function* instance
-  (field (budget: number))    ; Reductions remaining in current slice
-  (field (initial_budget: number)) ; Reset value for budget
-  
-  ;; Mailbox
-  (field (mailbox: array))                 ; Array of messages (FIFO)
-  (field (mailbox_max: number))            ; Max mailbox size
-  (field (mailbox_overflow_policy: MailboxOverflowPolicy))
-  (field (waiting_patterns: array))        ; Patterns this task is waiting for (when status = "waiting")
-  
-  ;; Capabilities & Effects
-  (field (capabilities: Set))    ; Set of capability tokens
-  
-  ;; Histories (Ring Buffers)
-  (field (history_effects: RingBuffer))      ; Last 100 effect events
-  (field (history_exceptional: RingBuffer))  ; Last 50 exceptional events
-  (field (history_critical: RingBuffer))     ; Last 20 critical events
-  
-  ;; Statistics (for diagnostics)
-  (field (created_at: number))
-  (field (total_reductions: number))
-  (field (total_messages_sent: number))
-  (field (total_messages_received: number))
-  (field (mailbox_scan_count: number))          ; Number of selective receive scans
-  (field (total_mailbox_scan_operations: number)) ; Total messages scanned
-)
+  (class-body
+    ;; Fields with defaults — not set via constructor shorthand
+    (field (name                          : string)                    "")
+    (field (status                        : TaskStatus)                "runnable")
+    (field (gen                           : Generator))
+    (field (budget                        : number)                    100)
+    (field (initial_budget                : number)                    100)
+    (field (mailbox                       : (Array any))               (array))
+    (field (mailbox_max                   : number)                    1000)
+    (field (mailbox_overflow_policy       : MailboxOverflowPolicy)     "drop-oldest")
+    (field (waiting_patterns              : (union (Array any) null))  null)
+    (field (history_effects               : RingBuffer))
+    (field (history_exceptional           : RingBuffer))
+    (field (history_critical              : RingBuffer))
+    (field (created_at                    : number)                    0)
+    (field (total_reductions              : number)                    0)
+    (field (total_messages_sent           : number)                    0)
+    (field (total_messages_received       : number)                    0)
+    (field (mailbox_scan_count            : number)                    0)
+    (field (total_mailbox_scan_operations : number)                    0)
+
+    ;; Constructor — id, priority, capabilities use field shorthand
+    (constructor
+      ((public id           : number)
+       (gen_fn              : Function)
+       (args                : (Array any))
+       (public priority     : Priority)
+       (public capabilities : (Set Capability)))
+      (set! (. this name)                (or (. gen_fn name) (+ "task-" (string id))))
+      (set! (. this gen)                 (apply gen_fn args))
+      (set! (. this history_effects)     (new RingBuffer 100))
+      (set! (. this history_exceptional) (new RingBuffer 50))
+      (set! (. this history_critical)    (new RingBuffer 20))
+      (set! (. this created_at)          (timestamp)))))
 ```
 
 **JavaScript Implementation:**
@@ -158,106 +159,111 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
 
 ```t2
 (class Scheduler
-  ;; Priority-based run queues (5 levels as per DESIGN.md)
-  (field (run_queues: object))  ; Map of priority -> array of tasks
-  
-  ;; Task registry
-  (field (tasks: object))                  ; Map: pid -> Task
-  (field (waiting_tasks: object))          ; Map: pid -> Task (blocked on receive)
-  (field (pid_counter: number))
-  
-  ;; Current execution state
-  (field (current_task: Task))
-  (field (tick_count: number))
-  (field (running: boolean))
-  
-  ;; System monitoring (for overload detection)
-  (field (total_run_queue_length: number))
-  (field (avg_slice_duration: number))      ; EMA of slice execution time
-  (field (slice_duration_samples: array))
-  (field (overload_threshold_queue_length: number))
-  (field (overload_threshold_slice_ms: number))
-  
-  ;; Global histories
-  (field (orchestrator_history: RingBuffer))
-  
-  ;; AGC Code emission
-  (field (agc_codes_emitted: array))
-  
-  ;; Priority order for scheduling
-  (field (priority_order: array))
-  
-  (method schedule (task: Task)
+  (class-body
+  ;; Fields
+  (field (run_queues                    : object))            ; Priority → (Array Task)
+  (field (tasks                         : (Map number Task)))
+  (field (waiting_tasks                 : (Map number Task)))
+  (field (pid_counter                   : number)             0)
+  (field (current_task                  : (union Task null))  null)
+  (field (tick_count                    : number)             0)
+  (field (running                       : boolean)            false)
+  (field (total_run_queue_length        : number)             0)
+  (field (avg_slice_duration            : number)             0)
+  (field (slice_duration_samples        : (Array number)))
+  (field (overload_threshold_queue_length : number)           1000)
+  (field (overload_threshold_slice_ms   : number)             50)
+  (field (orchestrator_history          : RingBuffer))
+  (field (agc_codes_emitted             : (Array AGCEvent)))
+  (field (priority_order                : (Array string)))
+
+  ;; Constructor — no params; all state initialized here
+  (constructor ()
+    (set! (. this run_queues)
+      (object
+        (critical (array))
+        (high     (array))
+        (normal   (array))
+        (low      (array))
+        (idle     (array))))
+    (set! (. this tasks)                    (new Map))
+    (set! (. this waiting_tasks)            (new Map))
+    (set! (. this slice_duration_samples)   (array))
+    (set! (. this orchestrator_history)     (new RingBuffer 200))
+    (set! (. this agc_codes_emitted)        (array))
+    (set! (. this priority_order)           (array "critical" "high" "normal" "low" "idle")))
+
+  (method schedule ((task : Task)) (returns void)
     "Add task to appropriate run queue"
-    (let priority (. task priority))
-    (let queue (get (. this run_queues) priority))
-    (array_push queue task)
+    (let (priority : Priority)  (. task priority))
+    (let (queue : (Array Task)) (index (. this run_queues) priority))
+    (method-call queue push task)
     (set! (. this total_run_queue_length) (+ (. this total_run_queue_length) 1)))
   
-  (method pick_next_task ()
+  (method pick_next_task () (returns (union Task null))
     "Select highest priority non-empty queue and dequeue task"
-    (for_each (. this priority_order) (lambda (priority)
-      (let queue (get (. this run_queues) priority))
+    (for_each (. this priority_order) (lambda ((priority : string))
+      (let (queue : (Array Task)) (index (. this run_queues) priority))
       (when (> (length queue) 0)
         (set! (. this total_run_queue_length) (- (. this total_run_queue_length) 1))
-        (return (array_shift queue)))))
-    nil)
+        (return (method-call queue shift)))))
+    null)
   
-  (method execute_slice (task: Task)
+  (method execute_slice ((task : Task)) (returns void)
     "Execute one slice of a task (up to budget reductions)"
     (set! (. this current_task) task)
     (set! (. task budget) (. task initial_budget))
     
-    (let start_time (timestamp))
-    (let result nil)
+    (let (start_time : number) (timestamp))
+    (let (result : any) null)
     
     (try
       (while (and (> (. task budget) 0) (= (. task status) "runnable"))
-        (set! result (call_generator_next (. task gen)))
+        (set! result (method-call (. task gen) next))
         (set! (. task budget) (- (. task budget) 1))
         (set! (. task total_reductions) (+ (. task total_reductions) 1))
         
         (match result
           ((object (done true) (value _))
             (set! (. task status) "done")
-            (this.on_task_completed task))
+            (method-call this on_task_completed task))
           
           ((object (done false) (value primitive))
-            (this.handle_primitive task primitive))))
+            (method-call this handle_primitive task primitive))))
       
       (catch error
-        (this.on_task_crashed task error)))
+        (method-call this on_task_crashed task error)))
     
     ;; Record slice duration for overload detection
-    (let duration (- (timestamp) start_time))
-    (this.record_slice_duration duration)
+    (let (duration : number) (- (timestamp) start_time))
+    (method-call this record_slice_duration duration)
     
     ;; Re-queue if still runnable
     (when (= (. task status) "runnable")
-      (this.schedule task))
+      (method-call this schedule task))
     
-    (set! (. this current_task) nil))
+    (set! (. this current_task) null))
   
-  (method handle_primitive (task: Task primitive:object)
+  (method handle_primitive ((task : Task) (primitive : object)) (returns void)
     "Handle yielded primitives from generator"
     (match primitive
       ((object (type "yield"))
         ;; Simple yield - task stays runnable
-        nil)
+        null)
       
       ((object (type "receive") (patterns patterns))
         ;; Selective receive - may block
-        (this.handle_receive task patterns))
+        (method-call this handle_receive task patterns))
       
       ((object (type "effect") (capability cap) (operation op) (args args))
         ;; Effect dispatch
-        (this.handle_effect task cap op args))
+        (method-call this handle_effect task cap op args))
       
       (_
-        (this.emit_agc_code "AGC-S999" (+ "Unknown primitive: " primitive))
+        (method-call this emit_agc_code "AGC-S999" (+ "Unknown primitive: " primitive))
         (set! (. task status) "crashed"))))
   
-  (method run ()
+  (method run () (returns void)
     "Main scheduler loop"
     (set! (. this running) true)
     
@@ -265,13 +271,13 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
       (set! (. this tick_count) (+ (. this tick_count) 1))
       
       ;; Check for overload
-      (this.check_overload)
+      (method-call this check_overload)
       
       ;; Pick next task
-      (let task (this.pick_next_task))
+      (let (task : (union Task null)) (method-call this pick_next_task))
       
       (if task
-        (this.execute_slice task)
+        (method-call this execute_slice task)
         ;; No tasks - could sleep or exit
         (if (= (length (keys (. this waiting_tasks))) 0)
           ;; No tasks at all - shut down
@@ -279,35 +285,34 @@ The Scheduler manages task lifecycle, priority_based scheduling, and system over
           ;; Only waiting tasks - could sleep briefly
           (sleep 1)))))
   
-  (method check_overload ()
+  (method check_overload () (returns void)
     "Detect system overload and emit AGC-S100 if needed"
     (when (> (. this total_run_queue_length) (. this overload_threshold_queue_length))
-      (this.emit_agc_code "AGC-S100" 
+      (method-call this emit_agc_code "AGC-S100"
         (+ "Overload: run queue length " (. this total_run_queue_length))))
     
     (when (> (. this avg_slice_duration) (. this overload_threshold_slice_ms))
-      (this.emit_agc_code "AGC-S100"
+      (method-call this emit_agc_code "AGC-S100"
         (+ "Overload: avg slice duration " (. this avg_slice_duration) "ms"))))
   
-  (method record_slice_duration (duration: number)
+  (method record_slice_duration ((duration : number)) (returns void)
     "Update EMA of slice duration"
-    (let alpha 0.1)
+    (let (alpha : number) 0.1)
     (set! (. this avg_slice_duration)
       (+ (* alpha duration) (* (- 1 alpha) (. this avg_slice_duration)))))
   
-  (method emit_agc_code (code message)
+  (method emit_agc_code ((code : string) (message : string)) (returns void)
     "Emit an AGC diagnostic code"
-    (let event { 
-      timestamp: (timestamp)
-      code: code
-      message: message
-      task: (if (. this current_task) (. this current_task id) nil)
-    })
-    (array_push (. this agc_codes_emitted) event)
-    (console.error (+ "[" code "] " message))
+    (let (event : AGCEvent)
+      (object
+        (timestamp (timestamp))
+        (code      code)
+        (message   message)
+        (task_id   (if (. this current_task) (. this current_task id) null))))
+    (method-call (. this agc_codes_emitted) push event)
+    (method-call console error (+ "[" code "] " message))
     (when (. this current_task)
-      (call (. this current_task recordCritical) code message)))
-)
+      (method-call (. this current_task) recordCritical code message))))))
 ```
 
 **JavaScript Implementation Sketch:**
@@ -349,26 +354,26 @@ class Scheduler {
 #### 1.3.1 `spawn(fn, args, priority, capabilities)`
 
 ```t2
-(defn spawn (generator_fn: function args:array priority:Priority capabilities:Set)
+(fn spawn ((generator_fn : Function) (args : (Array any)) (priority : Priority) (capabilities : (Set Capability))) : number
   "Create and schedule a new task"
-  (let scheduler (get_global_scheduler))
-  (let pid (scheduler.next_pid))
-  (let task (Task.new pid generator_fn args priority capabilities))
-  
+  (let (scheduler : Scheduler) (get_global_scheduler))
+  (let (pid : number)          (. scheduler next_pid))
+  (let (task : Task)           (new Task pid generator_fn args priority capabilities))
+
   ;; Register task
-  (map_set! (. scheduler tasks) pid task)
-  
+  (method-call (. scheduler tasks) set pid task)
+
   ;; Schedule task
-  (scheduler.schedule task)
-  
+  (method-call scheduler schedule task)
+
   ;; Record in orchestrator history
-  (ring_buffer_push! (. scheduler orchestrator_history)
+  (method-call (. scheduler orchestrator_history) push
     (object
-      (type "spawn")
+      (type      "spawn")
       (timestamp (timestamp))
-      (pid pid)
-      (priority priority)))
-  
+      (pid       pid)
+      (priority  priority)))
+
   pid)
 ```
 
@@ -396,9 +401,9 @@ function spawn(generatorFn, args = [], priority = 'normal', capabilities = new S
 #### 1.3.2 `yield()`
 
 ```t2
-(defn yield ()
-  "Cooperatively yield control back to scheduler"
-  (generator_yield (object (type "yield"))))
+;; In a generator-fn task body, yield control back to the scheduler:
+;;   (yield (object (type "yield")))
+;; The scheduler's handle_primitive sees (object (type "yield")) and keeps the task runnable.
 ```
 
 **In practice, the generator function simply calls JavaScript `yield`.**
@@ -406,10 +411,10 @@ function spawn(generatorFn, args = [], priority = 'normal', capabilities = new S
 #### 1.3.3 `run()`
 
 ```t2
-(defn run ()
+(fn run () : void
   "Start the scheduler main loop"
-  (let scheduler (get_global_scheduler))
-  (scheduler.run))
+  (let (scheduler : Scheduler) (get_global_scheduler))
+  (method-call scheduler run))
 ```
 ```
 
@@ -445,85 +450,85 @@ Each task declares mailbox behavior via options (see Task structure in 1.1.1):
 **Full Algorithm:**
 
 ```t2
-(defn send (target_pid: number msg:any)
+(fn send ((target_pid : number) (msg : any)) : void
   "Send a message to a task's mailbox"
-  (let scheduler (get_global_scheduler))
-  (let sender (. scheduler current_task))
-  
+  (let (scheduler : Scheduler)         (get_global_scheduler))
+  (let (sender : (union Task null))    (. scheduler current_task))
+
   ;; Look up target task
-  (let target (map_get (. scheduler tasks) target_pid))
+  (let (target : (union Task null))    (method-call (. scheduler tasks) get target_pid))
   
   (when (not target)
     ;; Target doesn't exist - emit warning
-    (scheduler.emit_agc_code "AGC-M050" 
+    (method-call scheduler emit_agc_code "AGC-M050"
       (+ "Send to non-existent pid: " target_pid))
-    (return nil))
+    (return null))
   
   ;; Check mailbox capacity
-  (let mailbox_length (length (. target mailbox)))
+  (let (mailbox_length : number) (length (. target mailbox)))
   
   (if (>= mailbox_length (. target mailbox_max))
     ;; Mailbox is full - apply overflow policy
     (match (. target mailbox_overflow_policy)
       ("drop-oldest"
-        (array_shift (. target mailbox))  ; Remove oldest
-        (array_push (. target mailbox) msg)
-        (scheduler.emit_agc_code "AGC-M010" 
+        (method-call (. target mailbox) shift)  ; Remove oldest
+        (method-call (. target mailbox) push msg)
+        (method-call scheduler emit_agc_code "AGC-M010"
           (+ "Mailbox overflow (drop-oldest) for task " target_pid)))
       
       ("drop-newest"
         ;; Do nothing - drop the new message
-        (scheduler.emit_agc_code "AGC-M010"
+        (method-call scheduler emit_agc_code "AGC-M010"
           (+ "Mailbox overflow (drop-newest) for task " target_pid)))
       
       ("reject"
         ;; Send error back to sender
         (when sender
-          (array_push (. sender mailbox) 
+          (method-call (. sender mailbox) push
             (array "mailbox_full" target_pid)))
-        (scheduler.emit_agc_code "AGC-M010"
+        (method-call scheduler emit_agc_code "AGC-M010"
           (+ "Mailbox overflow (reject) for task " target_pid)))
       
       ("escalate"
         ;; Crash the target task
         (set! (. target status) "crashed")
-        (scheduler.emit_agc_code "AGC-M010"
+        (method-call scheduler emit_agc_code "AGC-M010"
           (+ "Mailbox overflow (escalate) - crashing task " target_pid))
-        (target.recordExceptional "mailbox_overflow" (object (sender (if sender (. sender id) nil))))))
+        (method-call target recordExceptional "mailbox_overflow" (object (sender (if sender (. sender id) null))))))
     
     ;; Mailbox has space - append message
     (begin
-      (array_push (. target mailbox) msg)
-      
+      (method-call (. target mailbox) push msg)
+
       ;; Record in sender's stats
       (when sender
-        (set! (. sender total_messages_sent) 
+        (set! (. sender total_messages_sent)
           (+ (. sender total_messages_sent) 1)))
-      
+
       ;; Record in orchestrator history
-      (ring_buffer_push! (. scheduler orchestrator_history)
+      (method-call (. scheduler orchestrator_history) push
         (object
-          (type "send")
+          (type      "send")
           (timestamp (timestamp))
-          (from (if sender (. sender id) nil))
-          (to target_pid)
-          (message msg)))))
+          (from      (if sender (. sender id) null))
+          (to        target_pid)
+          (message   msg)))))
   
   ;; **CRUCIAL WAKE-UP LOGIC**
   ;; If target is waiting on receive, check if new message matches
   (when (= (. target status) "waiting")
     (when (. target waiting_patterns)
-      (let matched (try_match_patterns msg (. target waiting_patterns)))
+      (let (matched : (union object null)) (try_match_patterns msg (. target waiting_patterns)))
       (when matched
         ;; Message matches! Wake the task up
-        (map_delete! (. scheduler waiting_tasks) target_pid)
+        (method-call (. scheduler waiting_tasks) delete target_pid)
         (set! (. target status) "runnable")
-        (set! (. target waiting_patterns) nil)
-        (scheduler.schedule target)
+        (set! (. target waiting_patterns) null)
+        (method-call scheduler schedule target)
         
         ;; Record wake-up event
-        (target.recordExceptional "woken_by_message" 
-          (object (sender (if sender (. sender id) nil))))))))
+        (method-call target recordExceptional "woken_by_message"
+          (object (sender (if sender (. sender id) null))))))))
 ```
 
 **JavaScript Implementation:**
@@ -602,38 +607,38 @@ function send(targetPid, msg) {
 For basic receive (just pop the first message):
 
 ```t2
-(defn receive ()
-  "Block until a message arrives, then return it"
-  ;; In generator context, this yields a primitive
-  (generator_yield (object (type "receive") (patterns nil))))
+(fn receive () : any
+  "Block until a message arrives, then return it.
+   Call inside a generator-fn task body; the scheduler resumes with the message."
+  (yield (object (type "receive") (patterns null))))
 ```
 
 **Scheduler handling of `"receive"` primitive:**
 
 ```t2
-(method handle_receive (task: Task patterns:array)
+(method handle_receive ((task : Task) (patterns : (union (Array any) null))) (returns void)
   "Handle receive primitive - may block task"
-  
+
   (if (> (length (. task mailbox)) 0)
     ;; Mailbox not empty
     (if patterns
       ;; Selective receive (Stage 3)
-      (this.handle_selective_receive task patterns)
+      (method-call this handle_selective_receive task patterns)
       ;; Simple receive - pop first message
-      (let msg (array_shift (. task mailbox)))
+      (let (msg : any) (method-call (. task mailbox) shift))
       (set! (. task total_messages_received) (+ (. task total_messages_received) 1))
       ;; Resume generator with message
-      (set! (. task gen) (generator_send (. task gen) msg)))
-    
+      (set! (. task gen) (method-call (. task gen) next msg)))
+
     ;; Mailbox empty - block task
     (begin
       (set! (. task status) "waiting")
       (set! (. task waiting_patterns) patterns)
-      (map_set! (. this waiting_tasks) (. task id) task)
-      
+      (method-call (. this waiting_tasks) set (. task id) task)
+
       ;; Emit warning if task has been waiting too long
       ;; (this would be checked periodically by scheduler)
-      (task.recordExceptional "blocked_on_receive" (object)))))
+      (method-call task recordExceptional "blocked_on_receive" (object)))))
 ```
 
 **JavaScript Implementation:**
@@ -668,30 +673,30 @@ handleReceive(task, patterns) {
 The scheduler should periodically check for mailbox pathologies:
 
 ```t2
-(method check_mailbox_health (task: Task)
+(method check_mailbox_health ((task : Task)) (returns void)
   "Emit AGC codes for mailbox issues"
-  
+
   ;; AGC-M020: Slow consumer (mailbox growing)
   (when (> (length (. task mailbox)) (* (. task mailbox_max) 0.75))
-    (this.emit_agc_code "AGC-M020"
-      (+ "Slow consumer: task " (. task id) " mailbox at " 
+    (method-call this emit_agc_code "AGC-M020"
+      (+ "Slow consumer: task " (. task id) " mailbox at "
               (length (. task mailbox)) " messages")))
-  
+
   ;; AGC-M030: Unhandled messages (message stuck too long)
   (when (> (length (. task mailbox)) 0)
-    (let oldest_msg (get (. task mailbox) 0))
+    (let (oldest_msg : any) (index (. task mailbox) 0))
     (when (. oldest_msg timestamp)
-      (let age (- (timestamp) (. oldest_msg timestamp)))
+      (let (age : number) (- (timestamp) (. oldest_msg timestamp)))
       (when (> age 5000)  ; 5 seconds
-        (this.emit_agc_code "AGC-M031"
+        (method-call this emit_agc_code "AGC-M031"
           (+ "Message stuck for " age "ms in task " (. task id))))))
   
   ;; AGC-M040: Excessive mailbox scanning
   (when (> (. task mailbox_scan_count) 100)
-    (let avg_scan_ops (/ (. task total_mailbox_scan_operations) 
+    (let (avg_scan_ops : number) (/ (. task total_mailbox_scan_operations) 
                          (. task mailbox_scan_count)))
     (when (> avg_scan_ops 50)
-      (this.emit_agc_code "AGC-M040"
+      (method-call this emit_agc_code "AGC-M040"
         (+ "Excessive mailbox scanning: task " (. task id)
                 " avg " avg_scan_ops " ops per scan"))))
 )
@@ -738,8 +743,8 @@ _                        ; Matches anything, doesn't bind
 **Pattern Matching Algorithm:**
 
 ```t2
-(defn match_pattern (pattern: any value:any bindings:object)
-  "Attempt to match pattern against value. Returns bindings map or nil."
+(fn match_pattern ((pattern : any) (value : any) (bindings : object)) : (union object null)
+  "Attempt to match pattern against value. Returns bindings map or null."
   
   (cond
     ;; Wildcard - always matches
@@ -748,13 +753,14 @@ _                        ; Matches anything, doesn't bind
     
     ;; Symbol binding (lowercase identifier) - matches anything, binds value
     ((symbol? pattern)
-      (map_set bindings pattern value))
+      (method-call bindings set pattern value)
+      bindings)
     
     ;; Literal match (keyword, number, string)
     ((or (keyword? pattern) (number? pattern) (string? pattern))
       (if (= pattern value)
         bindings
-        nil))
+        null))
     
     ;; Tuple/Array pattern
     ((array? pattern)
@@ -763,14 +769,14 @@ _                        ; Matches anything, doesn't bind
         (reduce
           (lambda (acc i)
             (if (not acc)
-              nil
-              (match_pattern (get pattern i) (get value i) acc)))
+              null
+              (match_pattern (index pattern i) (index value i) acc)))
           bindings
           (range 0 (length pattern)))
-        nil))
+        null))
     
     ;; No match
-    (true nil)))
+    (true null)))
 ```
 
 **JavaScript Implementation:**
@@ -874,17 +880,17 @@ In t2-lang, `receive` is a macro that expands into a mailbox scanning loop:
 **Full Algorithm with Reduction Budget:**
 
 ```t2
-(method handle_selective_receive (task: Task patterns:array)
+(method handle_selective_receive ((task : Task) (patterns : (Array any))) (returns string)
   "Scan mailbox for first matching pattern"
-  
+
   ;; Track statistics
   (set! (. task mailbox_scan_count) (+ (. task mailbox_scan_count) 1))
-  
+
   ;; Scan mailbox
-  (let mailbox (. task mailbox))
-  (let scan_count 0)
+  (let (mailbox : (Array any)) (. task mailbox))
+  (let (scan_count : number)   0)
   
-  (for_each-indexed mailbox (lambda (msg index)
+  (for_each-indexed mailbox (lambda ((msg : any) (index : number))
     ;; Check reduction budget
     (set! scan_count (+ scan_count 1))
     (set! (. task total_mailbox_scan_operations) 
@@ -892,52 +898,52 @@ In t2-lang, `receive` is a macro that expands into a mailbox scanning loop:
     
     (when (>= scan_count (. task budget))
       ;; Exceeded budget - must yield and continue later
-      (task.recordExceptional "mailbox_scan_budget_exceeded" 
+      (method-call task recordExceptional "mailbox_scan_budget_exceeded"
         (object (scanned scan_count) (remaining (- (length mailbox) index))))
       (set! (. task budget) 0)
       (return "budget_exceeded"))
     
     ;; Try each pattern in order
-    (for_each patterns (lambda (pattern_spec)
-      (let bindings (match_pattern (. pattern_spec pattern) msg {}))
-      
+    (for_each patterns (lambda ((pattern_spec : any))
+      (let (bindings : (union object null)) (match_pattern (. pattern_spec pattern) msg (object)))
+
       (when bindings
         ;; Match found! Remove message from mailbox
         (array_remove_at! mailbox index)
-        (set! (. task total_messages_received) 
+        (set! (. task total_messages_received)
               (+ (. task total_messages_received) 1))
-        
+
         ;; Record in task history
-        (task.recordExceptional "received_message" 
+        (method-call task recordExceptional "received_message"
           (object
-            (message msg)
-            (pattern_index (indexOf patterns pattern_spec))
+            (message         msg)
+            (pattern_index   (indexOf patterns pattern_spec))
             (mailbox_position index)))
-        
+
         ;; Resume generator with match result
-        (let match_result 
+        (let (match_result : object)
           (object
             (matched_pattern_index (indexOf patterns pattern_spec))
-            (message msg)
+            (message  msg)
             (bindings bindings)))
-        (set! (. task gen) (generator_send (. task gen) match_result))
+        (set! (. task gen) (method-call (. task gen) next match_result))
         
         (return "matched"))))
     
     ;; No pattern matched this message, continue to next
-    nil))
+    null))
   
   ;; If we get here, no message matched any pattern
   (when (not= scan_count "budget_exceeded")
     ;; Block task until new message arrives
     (set! (. task status) "waiting")
     (set! (. task waiting_patterns) patterns)
-    (map_set! (. this waiting_tasks) (. task id) task)
-    
-    (task.recordExceptional "blocked_on_selective_receive" 
+    (method-call (. this waiting_tasks) set (. task id) task)
+
+    (method-call task recordExceptional "blocked_on_selective_receive"
       (object
         (patterns_count (length patterns))
-        (mailbox_size (length mailbox))))))
+        (mailbox_size   (length mailbox))))))
 ```
 
 **JavaScript Implementation:**
@@ -1010,10 +1016,10 @@ handleSelectiveReceive(task, patterns) {
 Earlier in Stage 2 we showed basic wake-up logic in `send`. Now we refine it for selective receive:
 
 ```t2
-(defn try_match_patterns (msg: any patterns:array)
+(fn try_match_patterns ((msg : any) (patterns : (Array any))) : boolean
   "Check if message matches any of the waiting patterns"
-  (for_each patterns (lambda (pattern_spec)
-    (let bindings (match_pattern (. pattern_spec pattern) msg {}))
+  (for_each patterns (lambda ((pattern_spec : any))
+    (let (bindings : (union object null)) (match_pattern (. pattern_spec pattern) msg (object)))
     (when bindings
       (return true))))
   false)
@@ -1077,11 +1083,16 @@ Capabilities are **opaque tokens** that grant authority to perform specific effe
 (export (type CapabilityType (tlit "log") (tlit "io") (tlit "timer") (tlit "random") (tlit "shared-blob")))
 
 (class Capability
-  (field (id: string))
-  (field (type: CapabilityType))
-  (field (operations: array))  ; Allowed operations
-  (field (metadata: object))  ; Additional constraints
-)
+  (class-body
+    ;; id auto-generated — not a constructor param
+    (field (id : string) "")
+
+    ;; Constructor — type, operations, metadata use field shorthand
+    (constructor
+      ((public type       : CapabilityType)
+       (public operations : (Array string))
+       (public metadata   : object))
+      (set! (. this id) (method-call crypto randomUUID)))))
 ```
 
 **JavaScript Implementation:**
@@ -1153,7 +1164,7 @@ function makeRandomCapability() {
   (receive
     ((array "io_capability" cap)
       ;; Worker now has I/O capability
-      (let data (effect cap "read" "https: //example.com"))
+      (let (data : any) (effect cap "read" "https: //example.com"))
       (yield))))
 ```
 
@@ -1164,137 +1175,145 @@ function makeRandomCapability() {
 **Full Implementation:**
 
 ```t2
-(defn effect (capability: Capability operation:string & args:array)
+(fn effect ((capability : Capability) (operation : string) (rest args : (Array any))) : any
   "Perform a side-effect with capability authorization"
-  
+
   ;; Yield to scheduler for verification and execution
-  (generator_yield 
+  (yield
     (object
-      (type "effect")
+      (type       "effect")
       (capability capability)
-      (operation operation)
-      (args args))))
+      (operation  operation)
+      (args       args))))
 ```
 
 **Scheduler's Effect Handler:**
 
 ```t2
-(method handle_effect (task: Task capability:Capability operation:string args:array)
+(method handle_effect ((task : Task) (capability : Capability) (operation : string) (args : (Array any))) (returns void)
   "Verify capability and dispatch effect"
-  
+
   ;; 1. Verify task holds the capability
-  (when (not (set_contains? (. task capabilities) capability))
-    (this.emit_agc_code "AGC-CAP500" 
+  (when (not (method-call (. task capabilities) has capability))
+    (method-call this emit_agc_code "AGC-CAP500"
       (+ "Task " (. task id) " attempted effect without capability"))
     (set! (. task status) "crashed")
-    (task.recordCritical "AGC-CAP500" "Unauthorized capability usage")
+    (method-call task recordCritical "AGC-CAP500" "Unauthorized capability usage")
     (return))
-  
+
   ;; 2. Verify capability allows this operation
-  (when (not (capability.can_perform? operation))
-    (this.emit_agc_code "AGC-CAP510"
+  (when (not (method-call capability canPerform operation))
+    (method-call this emit_agc_code "AGC-CAP510"
       (+ "Capability " (. capability type) " does not support operation " operation))
     (set! (. task status) "crashed")
     (return))
-  
+
   ;; 3. Record effect in history
-  (task.recordEffect capability operation args)
-  
+  (method-call task recordEffect capability operation args)
+
   ;; 4. Dispatch effect (with latency tracking)
-  (let start_time (timestamp))
-  (let result nil)
+  (let (start_time : number) (timestamp))
+  (let (result : any) null)
   
   (try
-    (set! result (this.dispatch_effect capability operation args))
+    (set! result (method-call this dispatch_effect capability operation args))
     (catch error
-      (this.emit_agc_code "AGC-E001"
+      (method-call this emit_agc_code "AGC-E001"
         (+ "Effect failed: " (. error message)))
-      (task.recordExceptional "effect_error" (object (operation operation) (error error)))))
+      (method-call task recordExceptional "effect_error" (object (operation operation) (error error)))))
   
-  (let duration (- (timestamp) start_time))
+  (let (duration : number) (- (timestamp) start_time))
   
   ;; 5. Check for slow effects
   (when (> duration 100)  ; 100ms threshold
-    (this.emit_agc_code "AGC-E050"
+    (method-call this emit_agc_code "AGC-E050"
       (+ "Slow effect: " operation " took " duration "ms")))
   
   ;; 6. Resume generator with result
-  (set! (. task gen) (generator_send (. task gen) result)))
+  (set! (. task gen) (method-call (. task gen) next result)))
 
-(method dispatch_effect (capability: Capability operation:string args:array)
+(method dispatch_effect ((capability : Capability) (operation : string) (args : (Array any))) (returns any)
   "Actually perform the effect (calls into JavaScript runtime)"
   
   (match (. capability type)
     ("log"
-      (this.effect_log operation args))
+      (method-call this effect_log operation args))
     
     ("io"
-      (this.effect_io operation args capability))
+      (method-call this effect_io operation args capability))
     
     ("timer"
-      (this.effect_timer operation args))
+      (method-call this effect_timer operation args))
     
     ("random"
-      (this.effect_random operation args))
+      (method-call this effect_random operation args))
     
     ("shared-blob"
-      (this.effect_shared_blob operation args capability))
+      (method-call this effect_shared_blob operation args capability))
     
     (_
       (throw (Error (+ "Unknown capability type: " (. capability type)))))))
 
 ;; Effect implementations
 
-(method effect_log (operation: string args:array)
-  (match operation
+(method effect_log ((operation : string) (args : (Array any))) (returns void)
+  (switch operation
     ("info" (console.log "[INFO]" ...args))
     ("warn" (console.warn "[WARN]" ...args))
     ("error" (console.error "[ERROR]" ...args))
     ("debug" (console.debug "[DEBUG]" ...args))))
 
-(method effect_io (operation: string args:array capability:Capability)
-  (match operation
-    ("fetch" 
-      (let (url) args)
+(method effect_io ((operation : string) (args : (Array any)) (capability : Capability)) (returns any)
+  (switch operation
+    (case "fetch"
+      (let (url : string) (index args 0))
       ;; Check allowed hosts
       (when (and (. capability metadata allowedHosts)
                  (> (length (. capability metadata allowedHosts)) 0))
-        (let host (extract_host url))
+        (let (host : string) (extract_host url))
         (when (not (includes? (. capability metadata allowedHosts) host))
           (throw (Error (+ "Host not allowed: " host)))))
       ;; Perform fetch
       (await (fetch url)))
     
-    ("read"
-      (let (path) args)
+    (case "read"
+      (let (path : string) (index args 0))
       ;; Node.js file read, etc.
       ...)
-    
-    ("write"
-      (let (path data) args)
+
+    (case "write"
+      (let (path : string) (index args 0))
+      (let (data : any)   (index args 1))
       ...)))
 
-(method effect_timer (operation: string args:array)
-  (match operation
-    ("sleep"
-      (let (ms) args)
+(method effect_timer ((operation : string) (args : (Array any))) (returns any)
+  (switch operation
+    (case "sleep"
+      (let (ms : number) (index args 0))
       ;; In cooperative context, this is tricky - may need to block task
       ;; and resume after timeout
       (this.schedule_task_resume (. this current_task) ms))
     
-    ("set_timeout"
-      (let (callback ms) args)
+    (case "set_timeout"
+      (let (callback : Function) (index args 0))
+      (let (ms : number)         (index args 1))
       (setTimeout callback ms))
-    
-    ("set_interval"
-      (let (callback ms) args)
+
+    (case "set_interval"
+      (let (callback : Function) (index args 0))
+      (let (ms : number)         (index args 1))
       (setInterval callback ms))))
 
-(method effect_random (operation: string args:array)
-  (match operation
-    ("next" () (Math.random))
-    ("next_int" (let (max) args) (Math.floor (* (Math.random) max)))
-    ("next_float" (let (min max) args) (+ min (* (Math.random) (- max min))))))
+(method effect_random ((operation : string) (args : (Array any))) (returns any)
+  (switch operation
+    (case "next"       (method-call Math random))
+    (case "next_int"
+      (let (max : number) (index args 0))
+      (method-call Math floor (* (method-call Math random) max)))
+    (case "next_float"
+      (let (min : number) (index args 0))
+      (let (max : number) (index args 1))
+      (+ min (* (method-call Math random) (- max min))))))
 ```
 
 **JavaScript Implementation:**
@@ -1463,38 +1482,42 @@ Based on DESIGN.md and DLITE.md, here is the full set of AGC diagnostic codes:
 
 ```t2
 (class AGCEvent
-  (field (code: string))           ; e.g. "AGC-M010"
-  (field (message: string))        ; Human-readable description
-  (field (timestamp: number))      ; When emitted
-  (field (task_id: number))        ; Which task (if applicable)
-  (field (context: object))        ; Additional data
-)
+  (class-body
+    ;; All fields set via constructor shorthand
+    (constructor
+      ((public code      : string)
+       (public message   : string)
+       (public timestamp : number)
+       (public task_id   : (union number null))
+       (public context   : object)))))
 
-(method emit_agc_code (code: string message:string)
+(method emit_agc_code ((code : string) (message : string)) (returns void)
   "Emit an AGC diagnostic code to multiple channels"
-  
-  (let event (AGCEvent.new code message (timestamp) 
-                           (if (. this current_task) 
-                               (. this current_task id) 
-                               nil)
-                           (object)))
-  
+
+  (let (event : AGCEvent)
+    (new AGCEvent
+      code
+      message
+      (timestamp)
+      (if (. this current_task) (. this current_task id) null)
+      (object)))
+
   ;; 1. Add to global AGC codes list
-  (array_push (. this agc_codes_emitted) event)
-  
+  (method-call (. this agc_codes_emitted) push event)
+
   ;; 2. Add to orchestrator history
-  (ring_buffer_push! (. this orchestrator_history) event)
-  
+  (method-call (. this orchestrator_history) push event)
+
   ;; 3. Add to current task's critical history (if in task context)
   (when (. this current_task)
-    ((. this current_task) recordCritical code message))
-  
+    (method-call (. this current_task) recordCritical code message))
+
   ;; 4. Emit to console (with color coding if possible)
-  (console.error (+ "[" code "] " message))
-  
+  (method-call console error (+ "[" code "] " message))
+
   ;; 5. Optional: Send to external monitoring system
   (when (. this monitoring_callback)
-    ((. this monitoring_callback) event)))
+    (method-call (. this monitoring_callback) call event)))
 ```
 
 **JavaScript Implementation:**
@@ -1858,7 +1881,7 @@ Defines message protocols at compile time and stores them in a global registry:
         (array ~tag ~@params))))))
   
   (quasi (begin
-    (map_set! (. __t2agc__ protocols) ~proto_name
+    (method-call (. __t2agc__ protocols) set ~proto_name
       (object
         (name     ~proto_name)
         (messages (array ~@(map parsed make_msg_obj)))))
@@ -2062,8 +2085,8 @@ Simplifies spawning tasks defined with the `task` macro by reading the stored `_
 (behavior supervisor (child_specs strategy max_restarts max_time)
   ("protocol" Supervisor)
   
-  (let children (object))      ; Map: child_id -> pid
-  (let restart_counts (object)) ; Map:  child_id -> [(timestamp count)]
+  (let (children       : (Map symbol number)) (new Map))
+  (let (restart_counts : (Map symbol (Array number))) (new Map))
   
   (loop
     (receive
@@ -2080,13 +2103,13 @@ Simplifies spawning tasks defined with the `task` macro by reading the stored `_
           
           ("temporary"
             ;; Don't restart
-            nil)))
+            null)))
       
       ;; Start all children
       ((array "start_all" from)
-        (for_each child_specs (lambda (spec)
-          (let pid (start_child spec))
-          (map_set! children (. spec id) pid)))
+        (for_each child_specs (lambda ((spec : ChildSpec))
+          (let (pid : number) (start_child spec))
+          (method-call children set (. spec id) pid)))
         (send from "ok"))
       
       ;; Introspection
@@ -2096,17 +2119,17 @@ Simplifies spawning tasks defined with the `task` macro by reading the stored `_
     (yield)
     (recur))))
 
-(defn restart_child (spec: ChildSpec)
+(fn restart_child ((spec : ChildSpec)) : void
   "Apply restart strategy"
   ;; Check restart limits
   (when (exceeded_restart_limit? spec)
     (emit_agc_code "AGC-SUP100" "Max restarts exceeded")
     (crash_supervisor))
-  
+
   ;; Spawn child
-  (let pid (spawn (. spec start) (array) "normal" (. spec capabilities)))
-  (map_set! children (. spec id) pid)
-  
+  (let (pid : number) (spawn (. spec start) (array) "normal" (. spec capabilities)))
+  (method-call children set (. spec id) pid)
+
   ;; Record restart
   (update_restart_count! (. spec id)))
 ```
@@ -2117,18 +2140,18 @@ Simple name->pid mapping:
 
 ```t2
 (task registry ()
-  (let names (object))  ; Map: name -> pid
-  
+  (let (names : (Map string number)) (new Map))
+
   (loop
     (receive
       ((array "register" name pid)
-        (map_set! names name pid))
-      
+        (method-call names set name pid))
+
       ((array "unregister" name)
-        (map_delete! names name))
-      
+        (method-call names delete name))
+
       ((array "whereis" name from)
-        (send from (map_get names name))))
+        (send from (method-call names get name))))
     
     (yield)
     (recur)))
