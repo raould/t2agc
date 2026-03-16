@@ -10,6 +10,7 @@
     "test": "tests"
   },
   "scripts": {
+    "build": "npx t2tc --outDir dist src/*.t2",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {
