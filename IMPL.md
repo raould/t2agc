@@ -2,6 +2,49 @@
 
 This document outlines the staged implementation plan for the `t2-agc` runtime, using `t2lang`. The goal is to build a tiny, deterministic, cooperative actor runtime inspired by the Apollo Guidance Computer.
 
+## Implementation Order
+
+- Key non-obvious ordering constraints:
+    - Capability must precede Task (constructor takes (Set Capability))
+    - RingBuffer and AGCEvent must both precede Scheduler (fields of Scheduler)
+    - __t2agc__ global must precede defmacro defprotocol (it writes into __t2agc__.protocols)
+    - try_match_patterns must precede send's wake-up logic (called in the wake-on-send path)
+    - defmacro task must precede defmacro behavior and defmacro spawn_task
+- Layer 0 — Pure type aliases (no dependencies)
+    - Priority
+    - TaskStatus
+    - MailboxOverflowPolicy
+    - CapabilityType
+    - RestartPolicy, ChildType (OTP)
+- Layer 1 — Foundational classes (depend only on primitives / Layer 0)
+    - RingBuffer — no type dependencies; needed by Task and Scheduler
+    - AGCEvent — fields are all primitives; needed by Scheduler
+    - Capability — depends on CapabilityType; needed by Task
+    - match_pattern — pure function, no class dependencies
+- Layer 2 — Core data model
+    - Task — depends on Priority, TaskStatus, MailboxOverflowPolicy, RingBuffer, Capability
+- Layer 3 — Execution engine
+    - Scheduler — depends on Task, AGCEvent, RingBuffer, Priority; includes all its methods (schedule, pick_next_task, execute_slice, handle_primitive, run, handle_receive, handle_selective_receive, handle_effect, dispatch_effect, effect_*, check_overload, check_mailbox_health, emit_agc_code)
+    - try_match_patterns — depends on match_pattern
+- Layer 4 — Runtime primitives (depend on Scheduler + Task)
+    - __t2agc__ global initialisation — wraps the Scheduler singleton; needed by protocol registry and debug API
+    - spawn — depends on Scheduler, Task, Capability, Priority
+    - run — depends on Scheduler
+    - send — depends on Scheduler, Task
+    - receive (basic blocking) — depends on scheduler's handle_receive
+    - effect — depends on Capability, Scheduler, Task
+- Layer 5 — Macros (depend on Layer 4 runtime being in place)
+    - defmacro receive — expands to yield + switch; depends on handle_selective_receive
+    - defmacro task — depends on spawn, generator-fn
+    - defmacro defprotocol — depends on __t2agc__ global
+    - defmacro defopaque — pure structural macro, no runtime deps
+    - defmacro spawn_task — depends on spawn + task macro
+- Layer 6 — OTP (depend on all of the above)
+    - ChildSpec interface — depends on RestartPolicy, ChildType, Priority, Capability
+    - restart_child — depends on spawn, ChildSpec
+    - Registry task — depends on task macro, send, receive, Map
+    - defmacro behavior — depends on defprotocol, task macro, spawn
+
 ---
 
 ## 📅 Stage 1: The Kernel (Scheduler & Tasks)
