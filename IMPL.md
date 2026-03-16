@@ -751,20 +751,20 @@ _                        ; Matches anything, doesn't bind
     ((= pattern "_")
       bindings)
     
-    ;; Symbol binding (lowercase identifier) - matches anything, binds value
-    ((symbol? pattern)
+    ;; Symbol binding - matches anything, binds value
+    ((== (typeof pattern) "symbol")
       (method-call bindings set pattern value)
       bindings)
     
-    ;; Literal match (keyword, number, string)
-    ((or (keyword? pattern) (number? pattern) (string? pattern))
+    ;; Literal match (number or string)
+    ((or (== (typeof pattern) "number") (== (typeof pattern) "string"))
       (if (= pattern value)
         bindings
         null))
     
     ;; Tuple/Array pattern
-    ((array? pattern)
-      (if (and (array? value) (= (length pattern) (length value)))
+    ((method-call Array isArray pattern)
+      (if (and (method-call Array isArray value) (= (length pattern) (length value)))
         ;; Recursively match each element
         (reduce
           (lambda (acc i)
@@ -1802,7 +1802,7 @@ The `task` macro provides syntactic sugar for defining tasks:
   (let (options)
     (take_while
       (lambda ((form))
-        (and (array? form) (= (length form) 2) (string? (head form))))
+        (and (method-call Array isArray form) (= (length form) 2) (== (typeof (head form)) "string")))
       options_and_body))
   (let (body)        (drop (length options) options_and_body))
   
@@ -1847,9 +1847,9 @@ Defines message protocols at compile time and stores them in a global registry:
     (let (tag)    (nth spec 1))
     (let (raw)    (drop 2 spec))
     (let (params) (filter raw (lambda ((p))
-      (not (and (pair? p) (= (length p) 2) (string? (head p)))))))
+      (not (and (method-call Array isArray p) (= (length p) 2) (== (typeof (head p)) "string"))))))
     (let (opts)   (filter raw (lambda ((p))
-      (and (pair? p) (= (length p) 2) (string? (head p))))))
+      (and (method-call Array isArray p) (= (length p) 2) (== (typeof (head p)) "string")))))
     (object (tag tag) (params params) (opts opts))))
   
   (let (parsed) (map message_specs parse_spec))
