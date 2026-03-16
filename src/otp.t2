@@ -1,0 +1,148 @@
+;; Layer 6 — OTP: supervisors, registries, and the behavior macro.
+;; Depends on: all previous layers.
+
+;; ── ChildSpec interface ───────────────────────────────────────────────────────
+;; A ChildSpec describes how a supervisor should start and restart a child.
+;; Fields:
+;;   id               : symbol        — unique identifier within the supervisor
+;;   start            : Function      — generator function (or task fn) to spawn
+;;   capabilities     : Array<Capability>
+;;   restart_policy   : RestartPolicy
+;;   shutdown_timeout : number        — milliseconds
+;;   type             : ChildType
+
+;; (No runtime class needed; supervisors treat child specs as plain objects.)
+
+
+;; ── restart_child ─────────────────────────────────────────────────────────────
+
+(fn restart_child ((spec : any)) : void
+  "Spawn a child according to its ChildSpec and record the restart."
+  (let (scheduler : Scheduler) (get_global_scheduler))
+
+  ;; Retrieve the supervisor's children and restart_counts maps from the
+  ;; current task's generator locals — accessed via the global context.
+  ;; NOTE: in practice the caller (supervisor loop) closes over these maps.
+  (let (pid : number)
+    (spawn
+      (. spec start)
+      (array)
+      (or (. spec priority) "normal")
+      (method-call (. spec capabilities) reduce
+        (lambda ((s : (Set Capability)) (c : Capability))
+          (method-call s add c)
+          s)
+        (new Set))))
+
+  pid)
+
+
+;; ── Registry task ─────────────────────────────────────────────────────────────
+;; Simple name → pid registry.  Spawn one instance at startup.
+
+(task registry ()
+  (let (names : (Map string number)) (new Map))
+
+  (loop
+    (receive
+      ((array "register" name pid)
+        (method-call names set name pid))
+
+      ((array "unregister" name)
+        (method-call names delete name))
+
+      ((array "whereis" name from)
+        (send from (method-call names get name))))
+    (yield)
+    (recur)))
+
+
+;; ── defmacro behavior ─────────────────────────────────────────────────────────
+;;
+;; A behavior is a task with a declared protocol annotation (for Dlite analysis).
+;; The protocol name is stored in __t2_task_options.protocol.
+;;
+;; Example:
+;;   (behavior counter_server Counter (initial_value cap_log)
+;;     (let state initial_value)
+;;     (loop
+;;       (receive
+;;         ((array "inc" n)    (set! state (+ state n)))
+;;         ((array "get" from) (send from state)))
+;;       (yield)
+;;       (recur)))
+;;
+;; Expands to:
+;;   (task counter_server (initial_value cap_log)
+;;     ("protocol" Counter)
+;;     (let state initial_value)
+;;     ...)
+
+(defmacro behavior ((name) (protocol) (params) (rest body))
+  "Define a behavior (gen_server-style task) with a protocol annotation.
+   Equivalent to the task macro with a ('protocol' <protocol>) option prepended."
+  (quasi (task ~name ~params
+    ("protocol" ~protocol)
+    ~@body)))
+
+
+;; ── Supervisor behavior ───────────────────────────────────────────────────────
+;; Standard one-for-one supervisor.  Restart intensity (max_restarts / max_time)
+;; is tracked but enforcement is left as a TODO.
+
+(task supervisor (child_specs strategy max_restarts max_time)
+  (let (children       : (Map symbol number))         (new Map))
+  (let (restart_counts : (Map symbol (Array number))) (new Map))
+
+  ;; Helper: record a restart timestamp for a child
+  (let (update_restart_count)
+    (lambda ((child_id : symbol))
+      (let (counts : (Array number))
+        (or (method-call restart_counts get child_id) (array)))
+      (method-call counts push (method-call Date now))
+      (method-call restart_counts set child_id counts)))
+
+  ;; Helper: find child spec by id
+  (let (find_spec)
+    (lambda ((child_id : symbol))
+      (let (found : any) null)
+      (let (i : number) 0)
+      (while (and (not found) (< i (length child_specs)))
+        (let (spec : any) (index child_specs i))
+        (when (= (. spec id) child_id)
+          (set! found spec))
+        (set! i (+ i 1)))
+      found))
+
+  ;; Start all children on init
+  (for_each child_specs (lambda ((spec : any))
+    (let (pid : number) (restart_child spec))
+    (method-call children set (. spec id) pid)))
+
+  (loop
+    (receive
+      ;; Child exited
+      ((array "exit" child_id reason)
+        (let (spec : any) (find_spec child_id))
+        (when spec
+          (match (. spec restart_policy)
+            ("permanent"
+              (update_restart_count child_id)
+              (let (new_pid : number) (restart_child spec))
+              (method-call children set (. spec id) new_pid))
+
+            ("transient"
+              (when (not= reason "normal")
+                (update_restart_count child_id)
+                (let (new_pid : number) (restart_child spec))
+                (method-call children set (. spec id) new_pid)))
+
+            ("temporary"
+              null))))
+
+      ;; Introspection
+      ((array "which_children" from)
+        (send from children)))
+
+    (yield)
+    (recur)))

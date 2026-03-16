@@ -1,0 +1,244 @@
+;; Layer 4 — Runtime primitives and __t2agc__ global.
+;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
+;;             Capability (capability.t2), match_pattern.t2
+
+;; ── Global accessor ───────────────────────────────────────────────────────────
+
+(fn get_global_scheduler () : Scheduler
+  (. (. globalThis __t2agc__) scheduler))
+
+;; ── __t2agc__ initialisation ──────────────────────────────────────────────────
+;; Call once at program startup, before spawning any tasks.
+
+(fn init_runtime () : void
+  (let (scheduler : Scheduler) (new Scheduler))
+  (set! (. globalThis __t2agc__)
+    (object
+      (scheduler scheduler)
+      (protocols (new Map))
+      (debug
+        (object
+          (list_tasks
+            (fn () : (Array any)
+              (let (result : (Array any)) (array))
+              (method-call (. scheduler tasks) for_each
+                (lambda ((task : Task) (pid : number))
+                  (method-call result push
+                    (object
+                      (pid              pid)
+                      (name             (. task name))
+                      (status           (. task status))
+                      (priority         (. task priority))
+                      (mailbox_size     (length (. task mailbox)))
+                      (total_reductions (. task total_reductions))))))
+              result))
+
+          (dump_task
+            (fn ((pid : number)) : (union object null)
+              (let (task : (union Task null)) (method-call (. scheduler tasks) get pid))
+              (if (not task)
+                null
+                (object
+                  (id               (. task id))
+                  (name             (. task name))
+                  (priority         (. task priority))
+                  (status           (. task status))
+                  (mailbox          (. task mailbox))
+                  (capabilities
+                    (method-call
+                      (method-call Array from (. task capabilities))
+                      map (lambda ((c : Capability)) (. c type))))
+                  (stats
+                    (object
+                      (total_reductions        (. task total_reductions))
+                      (messages_sent           (. task total_messages_sent))
+                      (messages_received       (. task total_messages_received))
+                      (mailbox_scans           (. task mailbox_scan_count))))
+                  (histories
+                    (object
+                      (effects     (method-call (. task history_effects)     to_array))
+                      (exceptional (method-call (. task history_exceptional) to_array))
+                      (critical    (method-call (. task history_critical)    to_array))))))))
+
+          (dump_mailbox
+            (fn ((pid : number)) : (union (Array any) null)
+              (let (task : (union Task null)) (method-call (. scheduler tasks) get pid))
+              (if task (. task mailbox) null)))
+
+          (list_waiting
+            (fn () : (Array number)
+              (method-call Array from (method-call (. scheduler waiting_tasks) keys))))
+
+          (get_agc_codes
+            (fn ((limit : number)) : (Array AGCEvent)
+              (method-call (. scheduler agc_codes_emitted) slice (- 0 limit))))
+
+          (weave_task_history
+            (fn ((pid : number)) : (union (Array any) null)
+              (let (task : (union Task null)) (method-call (. scheduler tasks) get pid))
+              (if (not task)
+                null
+                (begin
+                  (let (combined : (Array any))
+                    (method-call
+                      (method-call
+                        (method-call (. task history_effects) to_array)
+                        map (lambda ((e : any)) (object (source "effect") (event e))))
+                      concat
+                      (method-call
+                        (method-call (. task history_exceptional) to_array)
+                        map (lambda ((e : any)) (object (source "exceptional") (event e))))
+                      (method-call
+                        (method-call (. task history_critical) to_array)
+                        map (lambda ((e : any)) (object (source "critical") (event e))))))
+                  (method-call combined sort
+                    (lambda ((a : any) (b : any))
+                      (- (. (. a event) timestamp) (. (. b event) timestamp))))
+                  combined))))
+
+          (weave_system_history
+            (fn () : (Array any)
+              (method-call (. scheduler orchestrator_history) to_array))))))))
+
+;; ── spawn ──────────────────────────────────────────────────────────────────────
+
+(fn spawn
+    ((generator_fn  : Function)
+     (args          : (Array any))
+     (priority      : Priority)
+     (capabilities  : (Set Capability))) : number
+  "Create a Task, register it, and enqueue it for scheduling."
+  (let (scheduler : Scheduler) (get_global_scheduler))
+  (let (pid       : number)    (method-call scheduler next_pid))
+  (let (task      : Task)      (new Task pid generator_fn args priority capabilities))
+
+  (method-call (. scheduler tasks) set pid task)
+  (method-call scheduler schedule task)
+  (method-call (. scheduler orchestrator_history) push
+    (object
+      (type      "spawn")
+      (timestamp (method-call Date now))
+      (pid       pid)
+      (priority  priority)))
+  pid)
+
+;; ── run ────────────────────────────────────────────────────────────────────────
+
+(fn run () : void
+  "Start the scheduler loop.  Blocks (synchronously) until all tasks finish."
+  (let (scheduler : Scheduler) (get_global_scheduler))
+  (method-call scheduler run))
+
+;; ── send ───────────────────────────────────────────────────────────────────────
+
+(fn send ((target_pid : number) (msg : any)) : void
+  "Deliver msg to target task's mailbox, applying overflow policy, then
+   wake the target if it is blocked on a matching receive."
+  (let (scheduler : Scheduler)        (get_global_scheduler))
+  (let (sender    : (union Task null)) (. scheduler current_task))
+  (let (target    : (union Task null)) (method-call (. scheduler tasks) get target_pid))
+
+  (when (not target)
+    (method-call scheduler emit_agc_code "AGC-M050"
+      (+ "Send to non-existent pid: " target_pid))
+    (return undefined))
+
+  (let (mailbox_length : number) (length (. target mailbox)))
+
+  (if (>= mailbox_length (. target mailbox_max))
+    ;; Mailbox full — apply overflow policy
+    (match (. target mailbox_overflow_policy)
+      ("drop-oldest"
+        (method-call (. target mailbox) shift)
+        (method-call (. target mailbox) push msg)
+        (method-call scheduler emit_agc_code "AGC-M010"
+          (+ "Mailbox overflow (drop-oldest) for task " target_pid)))
+
+      ("drop-newest"
+        (method-call scheduler emit_agc_code "AGC-M010"
+          (+ "Mailbox overflow (drop-newest) for task " target_pid)))
+
+      ("reject"
+        (when sender
+          (method-call (. sender mailbox) push
+            (array "mailbox_full" target_pid)))
+        (method-call scheduler emit_agc_code "AGC-M010"
+          (+ "Mailbox overflow (reject) for task " target_pid)))
+
+      ("escalate"
+        (set! (. target status) "crashed")
+        (method-call scheduler emit_agc_code "AGC-M010"
+          (+ "Mailbox overflow (escalate) - crashing task " target_pid))
+        (method-call target record_exceptional "mailbox_overflow"
+          (object (sender (if sender (. sender id) null))))))
+
+    ;; Mailbox has space — append message
+    (begin
+      (method-call (. target mailbox) push msg)
+
+      (when sender
+        (set! (. sender total_messages_sent)
+          (+ (. sender total_messages_sent) 1)))
+
+      (method-call (. scheduler orchestrator_history) push
+        (object
+          (type      "send")
+          (timestamp (method-call Date now))
+          (from      (if sender (. sender id) null))
+          (to        target_pid)
+          (message   msg)))))
+
+  ;; ── Wake-up logic ─────────────────────────────────────────────────────────
+  ;; If target is blocked on receive and the new message matches, pre-compute
+  ;; the match result and store it as pending_resume so execute_slice can pass
+  ;; it directly to gen.next(), correctly resuming the receive yield.
+
+  (when (= (. target status) "waiting")
+    (if (. target waiting_patterns)
+      ;; Selective receive — compute match_result against the new message
+      (let (wake_result : (union object null))
+        (compute_match_result msg (. target waiting_patterns)))
+      (when wake_result
+        ;; Consume the message from the mailbox (we just pushed it above)
+        (method-call (. target mailbox) pop)
+        (set! (. target pending_resume)     wake_result)
+        (set! (. target waiting_patterns)   null)
+        (set! (. target status)             "runnable")
+        (method-call (. scheduler waiting_tasks) delete target_pid)
+        (method-call scheduler schedule target)
+        (method-call target record_exceptional "woken_by_message"
+          (object (sender (if sender (. sender id) null)))))
+
+      ;; Simple (non-selective) receive — any message wakes the task
+      (begin
+        ;; Move the message from the mailbox directly into pending_resume
+        (method-call (. target mailbox) pop)
+        (set! (. target pending_resume)   msg)
+        (set! (. target waiting_patterns) null)
+        (set! (. target status)           "runnable")
+        (method-call (. scheduler waiting_tasks) delete target_pid)
+        (method-call scheduler schedule target)
+        (method-call target record_exceptional "woken_by_message"
+          (object (sender (if sender (. sender id) null))))))))
+
+;; ── receive ────────────────────────────────────────────────────────────────────
+
+(fn receive () : any
+  "Yield a 'receive' primitive to the scheduler (basic blocking version).
+   The task is resumed with the first incoming message as the yield value.
+   Used directly in generator-fn bodies; see defmacro receive for the
+   pattern-matching sugar."
+  (yield (object (type "receive") (patterns null))))
+
+;; ── effect ─────────────────────────────────────────────────────────────────────
+
+(fn effect ((capability : Capability) (operation : string) (rest args : (Array any))) : any
+  "Yield an 'effect' primitive to the scheduler.
+   The scheduler verifies the capability, dispatches the effect, and resumes
+   the task with the effect's return value."
+  (yield
+    (object
+      (type       "effect")
+      (capability capability)
+      (operation  operation)
+      (args       args))))

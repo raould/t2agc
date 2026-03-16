@@ -1,0 +1,431 @@
+;; Layer 3 — Scheduler: the cooperative execution engine.
+;; Depends on: Task (task.t2), AGCEvent (agc_event.t2),
+;;             RingBuffer (ring_buffer.t2), Capability (capability.t2),
+;;             match_pattern / compute_match_result (match_pattern.t2),
+;;             Priority / TaskStatus (types.t2)
+;;
+;; Design note on generator resumption
+;; ─────────────────────────────────────
+;; execute_slice drives each task via a loop:
+;;   resume_val = task.pending_resume (cleared before loop)
+;;   loop: step = gen.next(resume_val)
+;;         resume_val = handle_primitive(step.value)   <- may be undefined
+;;
+;; handle_receive / handle_selective_receive RETURN the resume value
+;; (message or match_result object) instead of calling gen.next directly.
+;; For the async wake-up path (send -> schedule), send() sets
+;; task.pending_resume so that the next execute_slice picks it up.
+
+(class Scheduler
+  (class-body
+    (field (run_queues                      : object))          ;; Priority → Array<Task>
+    (field (tasks                           : (Map number Task)))
+    (field (waiting_tasks                   : (Map number Task)))
+    (field (pid_counter                     : number)           0)
+    (field (current_task                    : (union Task null)) null)
+    (field (tick_count                      : number)           0)
+    (field (running                         : boolean)          false)
+    (field (total_run_queue_length          : number)           0)
+    (field (avg_slice_duration              : number)           0)
+    (field (overload_threshold_queue_length : number)           1000)
+    (field (overload_threshold_slice_ms     : number)           50)
+    (field (orchestrator_history            : RingBuffer))
+    (field (agc_codes_emitted              : (Array AGCEvent)))
+    (field (priority_order                  : (Array string)))
+    (field (monitoring_callback             : (union Function null)) null)
+
+    (constructor ()
+      (set! (. this run_queues)
+        (object
+          (critical (array))
+          (high     (array))
+          (normal   (array))
+          (low      (array))
+          (idle     (array))))
+      (set! (. this tasks)               (new Map))
+      (set! (. this waiting_tasks)       (new Map))
+      (set! (. this orchestrator_history) (new RingBuffer 200))
+      (set! (. this agc_codes_emitted)   (array))
+      (set! (. this priority_order)      (array "critical" "high" "normal" "low" "idle")))
+
+    ;; ── PID allocation ────────────────────────────────────────────────────
+
+    (method next_pid () (returns number)
+      (let (pid : number) (. this pid_counter))
+      (set! (. this pid_counter) (+ (. this pid_counter) 1))
+      pid)
+
+    ;; ── Queue management ──────────────────────────────────────────────────
+
+    (method schedule ((task : Task)) (returns void)
+      "Enqueue task into its priority run queue."
+      (let (priority : Priority)  (. task priority))
+      (let (queue : (Array Task)) (index (. this run_queues) priority))
+      (method-call queue push task)
+      (set! (. this total_run_queue_length)
+        (+ (. this total_run_queue_length) 1)))
+
+    (method pick_next_task () (returns (union Task null))
+      "Dequeue the highest-priority runnable task."
+      (let (found : (union Task null)) null)
+      (let (i : number) 0)
+      (while (and (not found) (< i (length (. this priority_order))))
+        (let (priority : string) (index (. this priority_order) i))
+        (let (queue : (Array Task)) (index (. this run_queues) priority))
+        (when (> (length queue) 0)
+          (set! (. this total_run_queue_length)
+            (- (. this total_run_queue_length) 1))
+          (set! found (method-call queue shift)))
+        (set! i (+ i 1)))
+      found)
+
+    ;; ── Execution ─────────────────────────────────────────────────────────
+
+    (method execute_slice ((task : Task)) (returns void)
+      "Run one slice of a task (up to budget reductions)."
+      (set! (. this current_task) task)
+      (set! (. task budget) (. task initial_budget))
+
+      ;; Consume any pending resume value left by send() or a prior slice
+      (let (resume_val : any) (. task pending_resume))
+      (set! (. task pending_resume) undefined)
+
+      (let (start_time : number) (method-call Date now))
+
+      (try
+        (while (and (> (. task budget) 0) (= (. task status) "runnable"))
+          (let (step : any) (method-call (. task gen) next resume_val))
+          (set! resume_val undefined)
+          (set! (. task budget) (- (. task budget) 1))
+          (set! (. task total_reductions) (+ (. task total_reductions) 1))
+
+          (if (. step done)
+            (begin
+              (set! (. task status) "done")
+              (method-call this on_task_completed task))
+            (set! resume_val
+              (method-call this handle_primitive task (. step value)))))
+
+        (catch error
+          (method-call this on_task_crashed task error)))
+
+      (let (duration : number) (- (method-call Date now) start_time))
+      (method-call this record_slice_duration duration)
+
+      ;; Re-queue if still runnable (budget exhausted)
+      (when (= (. task status) "runnable")
+        (method-call this schedule task))
+
+      (set! (. this current_task) null))
+
+    (method handle_primitive ((task : Task) (primitive : any)) (returns any)
+      "Dispatch a yielded primitive; return the resume value for the next gen.next()."
+      (match primitive
+        ((object (type "yield"))
+          undefined)
+
+        ((object (type "receive") (patterns patterns))
+          (method-call this handle_receive task patterns))
+
+        ((object (type "effect") (capability cap) (operation op) (args args))
+          (method-call this handle_effect task cap op args))
+
+        (_
+          (method-call this emit_agc_code "AGC-S999"
+            (+ "Unknown primitive: " (method-call JSON stringify primitive)))
+          (set! (. task status) "crashed")
+          undefined)))
+
+    ;; ── Main loop ─────────────────────────────────────────────────────────
+
+    (method run () (returns void)
+      "Synchronous scheduler loop — runs until all tasks complete or block."
+      (set! (. this running) true)
+      (while (. this running)
+        (set! (. this tick_count) (+ (. this tick_count) 1))
+        (method-call this check_overload)
+        (let (task : (union Task null)) (method-call this pick_next_task))
+        (if task
+          (method-call this execute_slice task)
+          (if (= (method-call (. this waiting_tasks) size) 0)
+            (set! (. this running) false)
+            ;; Only waiting tasks remain — yield control to event loop
+            ;; TODO: in async context use setImmediate/setTimeout
+            (set! (. this running) false)))))
+
+    ;; ── Overload detection ────────────────────────────────────────────────
+
+    (method check_overload () (returns void)
+      (when (> (. this total_run_queue_length) (. this overload_threshold_queue_length))
+        (method-call this emit_agc_code "AGC-S100"
+          (+ "Overload: run queue length " (. this total_run_queue_length))))
+      (when (> (. this avg_slice_duration) (. this overload_threshold_slice_ms))
+        (method-call this emit_agc_code "AGC-S100"
+          (+ "Overload: avg slice duration " (. this avg_slice_duration) "ms"))))
+
+    (method record_slice_duration ((duration : number)) (returns void)
+      (let (alpha : number) 0.1)
+      (set! (. this avg_slice_duration)
+        (+ (* alpha duration) (* (- 1 alpha) (. this avg_slice_duration)))))
+
+    ;; ── Task lifecycle callbacks ───────────────────────────────────────────
+
+    (method on_task_completed ((task : Task)) (returns void)
+      (method-call (. this orchestrator_history) push
+        (object
+          (type      "task_completed")
+          (timestamp (method-call Date now))
+          (pid       (. task id)))))
+
+    (method on_task_crashed ((task : Task) (error : any)) (returns void)
+      (set! (. task status) "crashed")
+      (method-call this emit_agc_code "AGC-S999"
+        (+ "Task " (. task id) " crashed: " (. error message)))
+      (method-call task record_exceptional "crashed"
+        (object (error (. error message)))))
+
+    ;; ── Messaging primitives ──────────────────────────────────────────────
+
+    (method handle_receive ((task : Task) (patterns : (union (Array any) null))) (returns any)
+      "Handle a 'receive' primitive.  Returns the resume value, or undefined
+       if the task was blocked (in which case task.status = 'waiting')."
+      (if (> (length (. task mailbox)) 0)
+        (if patterns
+          ;; Selective receive
+          (method-call this handle_selective_receive task patterns)
+          ;; Simple FIFO receive — pop first message
+          (begin
+            (let (msg : any) (method-call (. task mailbox) shift))
+            (set! (. task total_messages_received)
+              (+ (. task total_messages_received) 1))
+            msg))
+        ;; Mailbox empty — block task
+        (begin
+          (set! (. task status)           "waiting")
+          (set! (. task waiting_patterns) patterns)
+          (method-call (. this waiting_tasks) set (. task id) task)
+          (method-call task record_exceptional "blocked_on_receive" (object))
+          undefined)))
+
+    (method handle_selective_receive ((task : Task) (patterns : (Array any))) (returns any)
+      "Scan mailbox for first matching pattern within reduction budget.
+       Returns match_result object on success, or undefined if blocked / budget exceeded."
+      (set! (. task mailbox_scan_count)
+        (+ (. task mailbox_scan_count) 1))
+
+      (let (mailbox    : (Array any)) (. task mailbox))
+      (let (scan_count : number)      0)
+      (let (matched    : (union object null)) null)
+      (let (msg_index  : number) 0)
+
+      (while (and (not matched) (< msg_index (length mailbox)))
+        (let (msg : any) (index mailbox msg_index))
+        (set! scan_count (+ scan_count 1))
+        (set! (. task total_mailbox_scan_operations)
+          (+ (. task total_mailbox_scan_operations) 1))
+
+        (when (>= scan_count (. task budget))
+          (method-call task record_exceptional "mailbox_scan_budget_exceeded"
+            (object (scanned scan_count) (remaining (- (length mailbox) msg_index))))
+          (set! (. task budget) 0)
+          (set! msg_index (length mailbox))) ;; break loop
+
+        (let (pattern_index : number) 0)
+        (while (and (not matched) (< pattern_index (length patterns)))
+          (let (ps       : any)                (index patterns pattern_index))
+          (let (bindings : (union object null)) (match_pattern (. ps pattern) msg (object)))
+          (when bindings
+            ;; Match found — remove message from mailbox
+            (method-call mailbox splice msg_index 1)
+            (set! (. task total_messages_received)
+              (+ (. task total_messages_received) 1))
+            (method-call task record_exceptional "received_message"
+              (object
+                (message          msg)
+                (pattern_index    pattern_index)
+                (mailbox_position msg_index)))
+            (set! matched
+              (object
+                (matched_pattern_index pattern_index)
+                (message               msg)
+                (bindings              bindings))))
+          (set! pattern_index (+ pattern_index 1)))
+
+        (when (not matched)
+          (set! msg_index (+ msg_index 1))))
+
+      (if matched
+        matched
+        ;; No pattern matched — block task
+        (begin
+          (set! (. task status)           "waiting")
+          (set! (. task waiting_patterns) patterns)
+          (method-call (. this waiting_tasks) set (. task id) task)
+          (method-call task record_exceptional "blocked_on_selective_receive"
+            (object
+              (patterns_count (length patterns))
+              (mailbox_size   (length mailbox))))
+          undefined)))
+
+    ;; ── Mailbox health monitoring ─────────────────────────────────────────
+
+    (method check_mailbox_health ((task : Task)) (returns void)
+      ;; AGC-M020: slow consumer
+      (when (> (length (. task mailbox)) (* (. task mailbox_max) 0.75))
+        (method-call this emit_agc_code "AGC-M020"
+          (+ "Slow consumer: task " (. task id)
+             " mailbox at " (length (. task mailbox)) " messages")))
+      ;; AGC-M031: message stuck too long
+      (when (> (length (. task mailbox)) 0)
+        (let (oldest_msg : any) (index (. task mailbox) 0))
+        (when (. oldest_msg timestamp)
+          (let (age : number) (- (method-call Date now) (. oldest_msg timestamp)))
+          (when (> age 5000)
+            (method-call this emit_agc_code "AGC-M031"
+              (+ "Message stuck for " age "ms in task " (. task id))))))
+      ;; AGC-M040: excessive mailbox scanning
+      (when (> (. task mailbox_scan_count) 100)
+        (let (avg_scan_ops : number)
+          (/ (. task total_mailbox_scan_operations) (. task mailbox_scan_count)))
+        (when (> avg_scan_ops 50)
+          (method-call this emit_agc_code "AGC-M040"
+            (+ "Excessive mailbox scanning: task " (. task id)
+               " avg " avg_scan_ops " ops per scan")))))
+
+    ;; ── Capabilities & effects ────────────────────────────────────────────
+
+    (method handle_effect
+        ((task       : Task)
+         (capability : Capability)
+         (operation  : string)
+         (args       : (Array any))) (returns any)
+      "Verify capability and dispatch effect; return result as generator resume value."
+
+      ;; 1. Verify task holds the capability
+      (when (not (method-call (. task capabilities) has capability))
+        (method-call this emit_agc_code "AGC-CAP500"
+          (+ "Task " (. task id) " attempted effect without capability"))
+        (set! (. task status) "crashed")
+        (method-call task record_critical "AGC-CAP500" "Unauthorized capability usage")
+        (return undefined))
+
+      ;; 2. Verify capability allows this operation
+      (when (not (method-call capability can_perform operation))
+        (method-call this emit_agc_code "AGC-CAP510"
+          (+ "Capability " (. capability type) " does not support operation " operation))
+        (set! (. task status) "crashed")
+        (return undefined))
+
+      ;; 3. Record effect in task history
+      (method-call task record_effect capability operation args)
+
+      ;; 4. Dispatch with latency tracking
+      (let (start_time : number) (method-call Date now))
+      (let (result : any) undefined)
+
+      (try
+        (set! result (method-call this dispatch_effect capability operation args))
+        (catch error
+          (method-call this emit_agc_code "AGC-E001"
+            (+ "Effect failed: " (. error message)))
+          (method-call task record_exceptional "effect_error"
+            (object (operation operation) (error (. error message))))))
+
+      (let (duration : number) (- (method-call Date now) start_time))
+      (when (> duration 100)
+        (method-call this emit_agc_code "AGC-E050"
+          (+ "Slow effect: " operation " took " duration "ms")))
+
+      result)
+
+    (method dispatch_effect
+        ((capability : Capability)
+         (operation  : string)
+         (args       : (Array any))) (returns any)
+      "Route effect to the appropriate handler method."
+      (match (. capability type)
+        ("log"         (method-call this effect_log    operation args))
+        ("io"          (method-call this effect_io     operation args capability))
+        ("timer"       (method-call this effect_timer  operation args))
+        ("random"      (method-call this effect_random operation args))
+        (_
+          (throw (new Error (+ "Unknown capability type: " (. capability type)))))))
+
+    (method effect_log ((operation : string) (args : (Array any))) (returns void)
+      (let (prefix : string) (+ "[" (method-call operation toUpperCase) "]"))
+      (switch operation
+        (case "info"  (method-call (. console log)   apply console (method-call (array prefix) concat args)))
+        (case "warn"  (method-call (. console warn)  apply console (method-call (array prefix) concat args)))
+        (case "error" (method-call (. console error) apply console (method-call (array prefix) concat args)))
+        (case "debug" (method-call (. console debug) apply console (method-call (array prefix) concat args)))))
+
+    (method effect_io
+        ((operation  : string)
+         (args       : (Array any))
+         (capability : Capability)) (returns any)
+      (switch operation
+        (case "fetch"
+          (let (url : string) (index args 0))
+          (when (and (. capability metadata allowedHosts)
+                     (> (length (. capability metadata allowedHosts)) 0))
+            (let (host : string) (extract_host url))
+            (when (not (method-call (. capability metadata allowedHosts) includes host))
+              (throw (new Error (+ "Host not allowed: " host)))))
+          (await (fetch url)))
+        (case "read"
+          (let (path : string) (index args 0))
+          (throw (new Error "effect_io 'read' not yet implemented")))
+        (case "write"
+          (let (path : string) (index args 0))
+          (let (data : any)   (index args 1))
+          (throw (new Error "effect_io 'write' not yet implemented")))))
+
+    (method effect_timer ((operation : string) (args : (Array any))) (returns any)
+      (switch operation
+        (case "sleep"
+          (let (ms : number) (index args 0))
+          ;; TODO: suspend task and resume after timeout (requires async scheduler)
+          (throw (new Error "effect_timer 'sleep' requires async scheduler")))
+        (case "set_timeout"
+          (let (callback : Function) (index args 0))
+          (let (ms       : number)   (index args 1))
+          (setTimeout callback ms))
+        (case "set_interval"
+          (let (callback : Function) (index args 0))
+          (let (ms       : number)   (index args 1))
+          (setInterval callback ms))))
+
+    (method effect_random ((operation : string) (args : (Array any))) (returns any)
+      (switch operation
+        (case "next"
+          (method-call Math random))
+        (case "next_int"
+          (let (max : number) (index args 0))
+          (method-call Math floor (* (method-call Math random) max)))
+        (case "next_float"
+          (let (min : number) (index args 0))
+          (let (max : number) (index args 1))
+          (+ min (* (method-call Math random) (- max min))))))
+
+    ;; ── AGC code emission ─────────────────────────────────────────────────
+
+    (method emit_agc_code ((code : string) (message : string)) (returns void)
+      "Emit a diagnostic event to all channels."
+      (let (event : AGCEvent)
+        (new AGCEvent
+          code
+          message
+          (method-call Date now)
+          (if (. this current_task) (. (. this current_task) id) null)
+          (object)))
+
+      (method-call (. this agc_codes_emitted) push event)
+      (method-call (. this orchestrator_history) push event)
+
+      (when (. this current_task)
+        (method-call (. this current_task) record_critical code message))
+
+      (method-call console error (+ "[" code "] " message))
+
+      (when (. this monitoring_callback)
+        (method-call (. this monitoring_callback) call null event)))))

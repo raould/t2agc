@@ -1,0 +1,26 @@
+;; Layer 1 — RingBuffer utility
+;; Fixed-size circular buffer; oldest entry overwritten when full.
+
+(class RingBuffer
+  (class-body
+    (field (buffer      : (Array any)))
+    (field (write_index : number) 0)
+    (field (count       : number) 0)
+
+    (constructor ((public size : number))
+      (set! (. this buffer) (new Array size)))
+
+    (method push ((item : any)) (returns void)
+      (set! (index (. this buffer) (. this write_index)) item)
+      (set! (. this write_index) (% (+ (. this write_index) 1) (. this size)))
+      (when (< (. this count) (. this size))
+        (set! (. this count) (+ (. this count) 1))))
+
+    (method to_array () (returns (Array any))
+      "Returns items in chronological (oldest-first) order."
+      (if (< (. this count) (. this size))
+        (method-call (. this buffer) slice 0 (. this count))
+        (method-call
+          (method-call (. this buffer) slice (. this write_index))
+          concat
+          (method-call (. this buffer) slice 0 (. this write_index)))))))

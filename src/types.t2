@@ -1,0 +1,37 @@
+;; Layer 0 — Pure type aliases (no dependencies)
+
+(export (type Priority
+  (tlit "critical")
+  (tlit "high")
+  (tlit "normal")
+  (tlit "low")
+  (tlit "idle")))
+
+(export (type TaskStatus
+  (tlit "runnable")
+  (tlit "waiting")
+  (tlit "done")
+  (tlit "crashed")))
+
+(export (type MailboxOverflowPolicy
+  (tlit "drop-oldest")
+  (tlit "drop-newest")
+  (tlit "reject")
+  (tlit "escalate")
+  (tlit "block-sender")))
+
+(export (type CapabilityType
+  (tlit "log")
+  (tlit "io")
+  (tlit "timer")
+  (tlit "random")
+  (tlit "shared-blob")))
+
+(export (type RestartPolicy
+  (tlit "permanent")
+  (tlit "transient")
+  (tlit "temporary")))
+
+(export (type ChildType
+  (tlit "worker")
+  (tlit "supervisor")))
