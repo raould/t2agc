@@ -11,9 +11,11 @@
   },
   "scripts": {
     "build": "npx t2tc --outDir dist src/*.t2",
-    "test": "vitest run"
+    "build-tests": "rimraf dist-tests &&npx t2tc --outDir dist-tests src/ring_buffer.t2 && cp tests/helpers.ts dist-tests/ && npx t2tc --outDir dist-tests tests/wtf.test.t2"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
+    "rimraf": "^6.1.3",
     "t2lang": "file:../t2lang",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
