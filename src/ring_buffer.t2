@@ -1,7 +1,8 @@
+(program
 ;; Layer 1 — RingBuffer utility
 ;; Fixed-size circular buffer; oldest entry overwritten when full.
 
-(class RingBuffer
+(export (class RingBuffer
   (class-body
     (field (buffer      : (Array any)))
     (field (write_index : number) 0)
@@ -11,7 +12,7 @@
       (set! (. this buffer) (new Array size)))
 
     (method push ((item : any)) (returns void)
-      (set! (index (. this buffer) (. this write_index)) item)
+      (method-call (. this buffer) splice (. this write_index) 1 item)
       (set! (. this write_index) (% (+ (. this write_index) 1) (. this size)))
       (when (< (. this count) (. this size))
         (set! (. this count) (+ (. this count) 1))))
@@ -24,3 +25,4 @@
           (method-call (. this buffer) slice (. this write_index))
           concat
           (method-call (. this buffer) slice 0 (. this write_index)))))))
+)

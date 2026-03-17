@@ -11,9 +11,11 @@
   },
   "scripts": {
     "build": "npx t2tc --outDir dist src/*.t2",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run"
   },
   "devDependencies": {
-    "t2lang": "file:../t2lang"
+    "t2lang": "file:../t2lang",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

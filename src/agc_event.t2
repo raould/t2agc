@@ -1,11 +1,13 @@
+(program
 ;; Layer 1 — AGCEvent: a single emitted diagnostic code record.
 ;; Depends only on primitives (all fields are string | number | null | object).
 
-(class AGCEvent
+(export (class AGCEvent
   (class-body
     (constructor
       ((public code      : string)
        (public message   : string)
        (public timestamp : number)
        (public task_id   : (union number null))
-       (public context   : object)))))
+       (public context   : object)))))))
+)
