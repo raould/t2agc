@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.js
+*.js.map
+*.d.ts
+debug_*.mjs
+tmp_*
+
+# Keep scripts
+!/scripts
+!/scripts/*.js
+
+# Keep bin
+!/bin
+!/bin/*.js
+
+# Keep source files
+!jest.config.js
+
+# Test coverage
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Package lock (optional - some prefer to commit this)
+package-lock.json
+
+# Compiled test output
+*.t2.ts
+*.t2.ts.map
+
+# No example left-overs.
+example*.ts
+example*.js
