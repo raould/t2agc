@@ -19,15 +19,14 @@ const RING_BUFFER_DEF = `
       (method-call (. this buffer) splice (. this write_index) 1 item)
       (set! (. this write_index) (% (+ (. this write_index) 1) (. this size)))
       (if (< (. this count) (. this size))
-        (begin (set! (. this count) (+ (. this count) 1)))
-        undefined))
+        (then (set! (. this count) (+ (. this count) 1)))))
     (method to_array () (returns (type-array any))
       (if (< (. this count) (. this size))
-        (method-call (. this buffer) slice 0 (. this count))
-        (method-call
+        (then (return (method-call (. this buffer) slice 0 (. this count))))
+        (else (return (method-call
           (method-call (. this buffer) slice (. this write_index))
           concat
-          (method-call (. this buffer) slice 0 (. this write_index)))))))
+          (method-call (. this buffer) slice 0 (. this write_index)))))))))
 `;
 
 const CAPABILITY_DEF = `
@@ -35,12 +34,12 @@ const CAPABILITY_DEF = `
   (class-body
     (field (id : string) "")
     (constructor
-      ((public type       : string)
+      ((public cap_type   : string)
        (public operations : (type-array string))
        (public metadata   : any))
-      (set! (. this id) (method-call crypto randomUUID)))
+      (set! (. this id) (method-call (. globalThis crypto) randomUUID)))
     (method can_perform ((operation : string)) (returns boolean)
-      (method-call (. this operations) includes operation))))
+      (return (method-call (. this operations) includes operation)))))
 `;
 
 const TASK_DEF = `
@@ -73,7 +72,7 @@ const TASK_DEF = `
        (public priority     : string)
        (public capabilities : any))
       (set! (. this name)
-        (or (. gen_fn name) (+ "task-" (string id))))
+        (|| (. gen_fn name) (+ "task-" (String id))))
       (set! (. this gen)                 (method-call gen_fn apply null args))
       (set! (. this history_effects)     (new RingBuffer 100))
       (set! (. this history_exceptional) (new RingBuffer 50))

@@ -32,7 +32,7 @@
        (args                : (Array any))
        (public priority     : Priority)
        (public capabilities : (Set Capability)))
-      (set! (. this name)                (or (. gen_fn name) (+ "task-" (string id))))
+      (set! (. this name)                (|| (. gen_fn name) (+ "task-" (String id))))
       (set! (. this gen)                 (apply gen_fn args))
       (set! (. this history_effects)     (new RingBuffer 100))
       (set! (. this history_exceptional) (new RingBuffer 50))

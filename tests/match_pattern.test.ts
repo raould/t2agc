@@ -6,62 +6,84 @@
 import { describe, it } from 'vitest';
 import { fromSourceEndToEnd } from './helpers.js';
 
-const MATCH_PATTERN_DEF = `
-(fn match_pattern ((pattern : any) (value : any) (bindings : any)) : any
-  (cond
-    ((= pattern "_")
-      bindings)
-    ((== (typeof pattern) "symbol")
-      (set! (index bindings pattern) value)
-      bindings)
-    ((or (== (typeof pattern) "number") (== (typeof pattern) "string"))
-      (if (= pattern value)
-        bindings
-        null))
-    ((method-call Array isArray pattern)
-      (if (not (and (method-call Array isArray value)
-                    (= (length pattern) (length value))))
-        null
-        (begin
-          (let (result : any) bindings)
-          (let (i : number) 0)
-          (while (and result (< i (length pattern)))
-            (set! result
-              (match_pattern (index pattern i) (index value i) result))
-            (set! i (+ i 1)))
-          result)))
-    (true null)))
+const MATCH_PATTERN_DEF = `(program
+;; Layer 1 — Pattern matching utilities.
+;; Pure functions; no class dependencies.
+;;
+;; Pattern types:
+;;   "_"            — wildcard, matches anything, no binding
+;;   symbol         — JS Symbol; matches anything, binds value under that key
+;;   number/string  — literal; must equal value exactly
+;;   array          — structural; recursively matches each element
 
-(fn try_match_patterns ((msg : any) (patterns : any)) : boolean
+(fn match_pattern ((pattern : any) (value : any) (bindings : object)) : (union object null)
+  "Attempt to match pattern against value.
+   Returns a (possibly mutated) bindings object on success, or null on failure.
+   'bindings' is passed in so recursive calls accumulate into the same object."
+  ;; Wildcard — always matches, no binding produced
+  (if (=== pattern "_")
+    (then (return bindings)))
+  ;; JS Symbol — variable binding; stores value under the symbol key
+  (if (=== (typeof pattern) "symbol")
+    (then (return (method-call Object assign bindings (object ([ pattern ] value))))))
+  ;; Literal (number or string) — exact equality match
+  (if (|| (=== (typeof pattern) "number") (=== (typeof pattern) "string"))
+    (then
+      (if (=== pattern value)
+        (then (return bindings))
+        (else (return null)))))
+  ;; Array / tuple pattern — structural match element-by-element
+  (if (method-call Array isArray pattern)
+    (then
+      (if (! (&& (method-call Array isArray value)
+                  (=== (. pattern length) (. value length))))
+        (then (return null)))
+      (let (result : (union object null)) bindings)
+      (let (i : number) 0)
+      (while (&& result (< i (. pattern length)))
+        (set! result
+          (match_pattern (index pattern i) (index value i) result))
+        (set! i (+ i 1)))
+      (return result)))
+  ;; No matching rule — fail
+  (return null))
+
+
+(fn try_match_patterns ((msg : any) (patterns : (Array any))) : boolean
+  "Return true if msg matches any pattern in the waiting_patterns array.
+   Used in send() to decide whether to wake a blocked task."
   (let (matched : boolean) false)
   (let (i : number) 0)
-  (while (and (not matched) (< i (length patterns)))
+  (while (&& (! matched) (< i (. patterns length)))
     (let (ps : any) (index patterns i))
-    (let (bindings : any)
+    (let (bindings : (union object null))
       (match_pattern (. ps pattern) msg (object)))
-    (if bindings
-      (begin (set! matched true))
-      undefined)
+    (if bindings (then (set! matched true)))
     (set! i (+ i 1)))
-  matched)
+  (return matched))
 
-(fn compute_match_result ((msg : any) (patterns : any)) : any
-  (let (result : any) null)
+
+(fn compute_match_result ((msg : any) (patterns : (Array any))) : (union object null)
+  "Return the first match-result object { matched_pattern_index, message, bindings }
+   for msg against patterns, or null if no pattern matches.
+   Used in send() to pre-compute the resume value for a waking task."
+  (let (result : (union object null)) null)
   (let (i : number) 0)
-  (while (and (not result) (< i (length patterns)))
+  (while (&& (! result) (< i (. patterns length)))
     (let (ps : any) (index patterns i))
-    (let (bindings : any)
+    (let (bindings : (union object null))
       (match_pattern (. ps pattern) msg (object)))
     (if bindings
-      (begin
+      (then
         (set! result
           (object
             (matched_pattern_index i)
             (message               msg)
-            (bindings              bindings))))
-      undefined)
+            (bindings              bindings)))))
     (set! i (+ i 1)))
-  result)
+  (return result))
+
+)
 `;
 
 describe('match_pattern', () => {
@@ -69,9 +91,9 @@ describe('match_pattern', () => {
     fromSourceEndToEnd(`(program
       (import (object (named (array (object (name "asrt"))))) "./helpers.js")
       ${MATCH_PATTERN_DEF}
-      (asrt (not= (match_pattern "_" 42      (object)) null) true)
-      (asrt (not= (match_pattern "_" "hello" (object)) null) true)
-      (asrt (not= (match_pattern "_" null    (object)) null) true)
+      (asrt (!= (match_pattern "_" 42      (object)) null) true)
+      (asrt (!= (match_pattern "_" "hello" (object)) null) true)
+      (asrt (!= (match_pattern "_" null    (object)) null) true)
     )`);
   });
 
@@ -79,7 +101,7 @@ describe('match_pattern', () => {
     fromSourceEndToEnd(`(program
       (import (object (named (array (object (name "asrt"))))) "./helpers.js")
       ${MATCH_PATTERN_DEF}
-      (asrt (not= (match_pattern "ok" "ok"   (object)) null) true)
+      (asrt (!= (match_pattern "ok" "ok"   (object)) null) true)
       (asrt       (match_pattern "ok" "fail" (object))       null)
     )`);
   });
@@ -88,7 +110,7 @@ describe('match_pattern', () => {
     fromSourceEndToEnd(`(program
       (import (object (named (array (object (name "asrt"))))) "./helpers.js")
       ${MATCH_PATTERN_DEF}
-      (asrt (not= (match_pattern 42 42 (object)) null) true)
+      (asrt (!= (match_pattern 42 42 (object)) null) true)
       (asrt       (match_pattern 42 99 (object))       null)
     )`);
   });
@@ -99,7 +121,7 @@ describe('match_pattern', () => {
       ${MATCH_PATTERN_DEF}
       (let (k) (Symbol "v"))
       (let (result) (match_pattern k 99 (object)))
-      (asrt (not= result null) true)
+      (asrt (!= result null) true)
       (asrt (index result k) 99)
     )`);
   });
@@ -119,7 +141,7 @@ describe('match_pattern', () => {
       ${MATCH_PATTERN_DEF}
       (let (result)
         (match_pattern (array "ok" "_") (array "ok" 42) (object)))
-      (asrt (not= result null) true)
+      (asrt (!= result null) true)
     )`);
   });
 
@@ -130,7 +152,7 @@ describe('match_pattern', () => {
       (let (k) (Symbol "n"))
       (let (result)
         (match_pattern (array "inc" k) (array "inc" 5) (object)))
-      (asrt (not= result null) true)
+      (asrt (!= result null) true)
       (asrt (index result k) 5)
     )`);
   });
@@ -190,7 +212,7 @@ describe('compute_match_result', () => {
           (object (pattern "stop"))
           (object (pattern (array "inc" "_")))))
       (let (r) (compute_match_result (array "inc" 7) patterns))
-      (asrt (not= r null) true)
+      (asrt (!= r null) true)
       (asrt (. r matched_pattern_index) 1)
       (asrt (. (. r message) 0) "inc")
       (asrt (. (. r message) 1) 7)
@@ -205,7 +227,7 @@ describe('compute_match_result', () => {
       (let (patterns)
         (array (object (pattern (array "set" k)))))
       (let (r) (compute_match_result (array "set" 99) patterns))
-      (asrt (not= r null)          true)
+      (asrt (!= r null)          true)
       (asrt (. r matched_pattern_index) 0)
       (asrt (index (. r bindings) k) 99)
     )`);

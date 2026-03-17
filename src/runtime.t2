@@ -29,16 +29,16 @@
                       (name             (. task name))
                       (status           (. task status))
                       (priority         (. task priority))
-                      (mailbox_size     (length (. task mailbox)))
+                      (mailbox_size     (. (. task mailbox) length))
                       (total_reductions (. task total_reductions))))))
               result))
 
           (dump_task
             (fn ((pid : number)) : (union object null)
               (let (task : (union Task null)) (method-call (. scheduler tasks) get pid))
-              (if (not task)
-                null
-                (object
+              (if (! task)
+                (then (return null))
+                (else (return (object
                   (id               (. task id))
                   (name             (. task name))
                   (priority         (. task priority))
@@ -47,7 +47,7 @@
                   (capabilities
                     (method-call
                       (method-call Array from (. task capabilities))
-                      map (lambda ((c : Capability)) (. c type))))
+                      map (lambda ((c : Capability)) (. c cap_type))))
                   (stats
                     (object
                       (total_reductions        (. task total_reductions))
@@ -58,12 +58,12 @@
                     (object
                       (effects     (method-call (. task history_effects)     to_array))
                       (exceptional (method-call (. task history_exceptional) to_array))
-                      (critical    (method-call (. task history_critical)    to_array))))))))
+                      (critical    (method-call (. task history_critical)    to_array))))))))))
 
           (dump_mailbox
             (fn ((pid : number)) : (union (Array any) null)
               (let (task : (union Task null)) (method-call (. scheduler tasks) get pid))
-              (if task (. task mailbox) null)))
+              (if task (then (return (. task mailbox))) (else (return null)))
 
           (list_waiting
             (fn () : (Array number)
@@ -76,9 +76,9 @@
           (weave_task_history
             (fn ((pid : number)) : (union (Array any) null)
               (let (task : (union Task null)) (method-call (. scheduler tasks) get pid))
-              (if (not task)
-                null
-                (begin
+              (if (! task)
+                (then (return null))
+                (else
                   (let (combined : (Array any))
                     (method-call
                       (method-call
@@ -94,7 +94,7 @@
                   (method-call combined sort
                     (lambda ((a : any) (b : any))
                       (- (. (. a event) timestamp) (. (. b event) timestamp))))
-                  combined))))
+                  (return combined))))
 
           (weave_system_history
             (fn () : (Array any)
@@ -103,14 +103,14 @@
 ;; ── spawn ──────────────────────────────────────────────────────────────────────
 
 (fn spawn
-    ((generator_fn  : Function)
+    ((gen_fn        : Function)
      (args          : (Array any))
      (priority      : Priority)
      (capabilities  : (Set Capability))) : number
   "Create a Task, register it, and enqueue it for scheduling."
   (let (scheduler : Scheduler) (get_global_scheduler))
   (let (pid       : number)    (method-call scheduler next_pid))
-  (let (task      : Task)      (new Task pid generator_fn args priority capabilities))
+  (let (task      : Task)      (new Task pid gen_fn args priority capabilities))
 
   (method-call (. scheduler tasks) set pid task)
   (method-call scheduler schedule task)
@@ -138,53 +138,57 @@
   (let (sender    : (union Task null)) (. scheduler current_task))
   (let (target    : (union Task null)) (method-call (. scheduler tasks) get target_pid))
 
-  (when (not target)
-    (method-call scheduler emit_agc_code "AGC-M050"
-      (+ "Send to non-existent pid: " target_pid))
-    (return undefined))
+  (if (! target)
+    (then
+      (method-call scheduler emit_agc_code "AGC-M050"
+        (+ "Send to non-existent pid: " target_pid))
+      (return undefined)))
 
-  (let (mailbox_length : number) (length (. target mailbox)))
+  (let (mailbox_length : number) (. (. target mailbox) length))
 
   (if (>= mailbox_length (. target mailbox_max))
     ;; Mailbox full — apply overflow policy
-    (match (. target mailbox_overflow_policy)
-      ("drop-oldest"
-        (method-call (. target mailbox) shift)
-        (method-call (. target mailbox) push msg)
-        (method-call scheduler emit_agc_code "AGC-M010"
-          (+ "Mailbox overflow (drop-oldest) for task " target_pid)))
+    (then
+      (match (. target mailbox_overflow_policy)
+        ("drop-oldest"
+          (method-call (. target mailbox) shift)
+          (method-call (. target mailbox) push msg)
+          (method-call scheduler emit_agc_code "AGC-M010"
+            (+ "Mailbox overflow (drop-oldest) for task " target_pid)))
 
-      ("drop-newest"
-        (method-call scheduler emit_agc_code "AGC-M010"
-          (+ "Mailbox overflow (drop-newest) for task " target_pid)))
+        ("drop-newest"
+          (method-call scheduler emit_agc_code "AGC-M010"
+            (+ "Mailbox overflow (drop-newest) for task " target_pid)))
 
-      ("reject"
-        (when sender
-          (method-call (. sender mailbox) push
-            (array "mailbox_full" target_pid)))
-        (method-call scheduler emit_agc_code "AGC-M010"
-          (+ "Mailbox overflow (reject) for task " target_pid)))
+        ("reject"
+          (if sender
+            (then
+              (method-call (. sender mailbox) push
+                (array "mailbox_full" target_pid))))
+          (method-call scheduler emit_agc_code "AGC-M010"
+            (+ "Mailbox overflow (reject) for task " target_pid)))
 
-      ("escalate"
-        (set! (. target status) "crashed")
-        (method-call scheduler emit_agc_code "AGC-M010"
-          (+ "Mailbox overflow (escalate) - crashing task " target_pid))
-        (method-call target record_exceptional "mailbox_overflow"
-          (object (sender (if sender (. sender id) null))))))
+        ("escalate"
+          (set! (. target status) "crashed")
+          (method-call scheduler emit_agc_code "AGC-M010"
+            (+ "Mailbox overflow (escalate) - crashing task " target_pid))
+          (method-call target record_exceptional "mailbox_overflow"
+            (object (sender (ternary sender (. sender id) null)))))))
 
     ;; Mailbox has space — append message
-    (begin
+    (else
       (method-call (. target mailbox) push msg)
 
-      (when sender
-        (set! (. sender total_messages_sent)
-          (+ (. sender total_messages_sent) 1)))
+      (if sender
+        (then
+          (set! (. sender total_messages_sent)
+            (+ (. sender total_messages_sent) 1))))
 
       (method-call (. scheduler orchestrator_history) push
         (object
           (type      "send")
           (timestamp (method-call Date now))
-          (from      (if sender (. sender id) null))
+          (from      (ternary sender (. sender id) null))
           (to        target_pid)
           (message   msg)))))
 
@@ -193,33 +197,36 @@
   ;; the match result and store it as pending_resume so execute_slice can pass
   ;; it directly to gen.next(), correctly resuming the receive yield.
 
-  (when (= (. target status) "waiting")
-    (if (. target waiting_patterns)
-      ;; Selective receive — compute match_result against the new message
-      (let (wake_result : (union object null))
-        (compute_match_result msg (. target waiting_patterns)))
-      (when wake_result
-        ;; Consume the message from the mailbox (we just pushed it above)
-        (method-call (. target mailbox) pop)
-        (set! (. target pending_resume)     wake_result)
-        (set! (. target waiting_patterns)   null)
-        (set! (. target status)             "runnable")
-        (method-call (. scheduler waiting_tasks) delete target_pid)
-        (method-call scheduler schedule target)
-        (method-call target record_exceptional "woken_by_message"
-          (object (sender (if sender (. sender id) null)))))
+  (if (== (. target status) "waiting")
+    (then
+      (if (. target waiting_patterns)
+        ;; Selective receive — compute match_result against the new message
+        (then
+          (let (wake_result : (union object null))
+            (compute_match_result msg (. target waiting_patterns)))
+          (if wake_result
+            ;; Consume the message from the mailbox (we just pushed it above)
+            (then
+              (method-call (. target mailbox) pop)
+              (set! (. target pending_resume)     wake_result)
+              (set! (. target waiting_patterns)   null)
+              (set! (. target status)             "runnable")
+              (method-call (. scheduler waiting_tasks) delete target_pid)
+              (method-call scheduler schedule target)
+              (method-call target record_exceptional "woken_by_message"
+                (object (sender (ternary sender (. sender id) null)))))))
 
-      ;; Simple (non-selective) receive — any message wakes the task
-      (begin
-        ;; Move the message from the mailbox directly into pending_resume
-        (method-call (. target mailbox) pop)
-        (set! (. target pending_resume)   msg)
-        (set! (. target waiting_patterns) null)
-        (set! (. target status)           "runnable")
-        (method-call (. scheduler waiting_tasks) delete target_pid)
-        (method-call scheduler schedule target)
-        (method-call target record_exceptional "woken_by_message"
-          (object (sender (if sender (. sender id) null))))))))
+        ;; Simple (non-selective) receive — any message wakes the task
+        (else
+          ;; Move the message from the mailbox directly into pending_resume
+          (method-call (. target mailbox) pop)
+          (set! (. target pending_resume)   msg)
+          (set! (. target waiting_patterns) null)
+          (set! (. target status)           "runnable")
+          (method-call (. scheduler waiting_tasks) delete target_pid)
+          (method-call scheduler schedule target)
+          (method-call target record_exceptional "woken_by_message"
+            (object (sender (ternary sender (. sender id) null)))))))))
 
 ;; ── receive ────────────────────────────────────────────────────────────────────
 

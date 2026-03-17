@@ -7,31 +7,30 @@
     (field (id : string) "")
 
     (constructor
-      ((public type       : CapabilityType)
+      ((public cap_type   : CapabilityType)
        (public operations : (Array string))
        (public metadata   : object))
-      (set! (. this id) (method-call crypto randomUUID)))
+      (set! (. this id) (method-call (. globalThis crypto) randomUUID)))
 
     (method can_perform ((operation : string)) (returns boolean)
       "Return true if this capability allows the given operation."
-      (method-call (. this operations) includes operation))))
-
+      (return (method-call (. this operations) includes operation)))))
 
 ;; ── Predefined capability constructors ──────────────────────────────────────
 
 (fn make_log_capability () : Capability
   "Full log capability: info, warn, error, debug."
-  (new Capability "log" (array "info" "warn" "error" "debug") (object)))
+  (return (new Capability "log" (array "info" "warn" "error" "debug") (object))))
 
 (fn make_io_capability ((allowed_hosts : (Array string))) : Capability
   "I/O capability; optionally restricts fetch to specific hostnames."
-  (new Capability "io" (array "read" "write" "fetch")
-    (object (allowedHosts allowed_hosts))))
+  (return (new Capability "io" (array "read" "write" "fetch")
+    (object (allowedHosts allowed_hosts)))))
 
 (fn make_timer_capability () : Capability
   "Timer capability: sleep, set_timeout, set_interval."
-  (new Capability "timer" (array "sleep" "set_timeout" "set_interval") (object)))
+  (return (new Capability "timer" (array "sleep" "set_timeout" "set_interval") (object))))
 
 (fn make_random_capability () : Capability
   "Random number generation capability."
-  (new Capability "random" (array "next" "next_int" "next_float") (object)))
+  (return (new Capability "random" (array "next" "next_int" "next_float") (object))))

@@ -27,7 +27,7 @@
     (spawn
       (. spec start)
       (array)
-      (or (. spec priority) "normal")
+      (|| (. spec priority) "normal")
       (method-call (. spec capabilities) reduce
         (lambda ((s : (Set Capability)) (c : Capability))
           (method-call s add c)
@@ -98,7 +98,7 @@
   (let (update_restart_count)
     (lambda ((child_id : symbol))
       (let (counts : (Array number))
-        (or (method-call restart_counts get child_id) (array)))
+        (|| (method-call restart_counts get child_id) (array)))
       (method-call counts push (method-call Date now))
       (method-call restart_counts set child_id counts)))
 
@@ -107,10 +107,10 @@
     (lambda ((child_id : symbol))
       (let (found : any) null)
       (let (i : number) 0)
-      (while (and (not found) (< i (length child_specs)))
+      (while (&& (! found) (< i (. child_specs length)))
         (let (spec : any) (index child_specs i))
-        (when (= (. spec id) child_id)
-          (set! found spec))
+        (if (== (. spec id) child_id)
+          (then (set! found spec)))
         (set! i (+ i 1)))
       found))
 
@@ -124,18 +124,19 @@
       ;; Child exited
       ((array "exit" child_id reason)
         (let (spec : any) (find_spec child_id))
-        (when spec
-          (match (. spec restart_policy)
+        (if spec
+          (then (match (. spec restart_policy)
             ("permanent"
               (update_restart_count child_id)
               (let (new_pid : number) (restart_child spec))
               (method-call children set (. spec id) new_pid))
 
             ("transient"
-              (when (not= reason "normal")
-                (update_restart_count child_id)
-                (let (new_pid : number) (restart_child spec))
-                (method-call children set (. spec id) new_pid)))
+              (if (!= reason "normal")
+                (then
+                  (update_restart_count child_id)
+                  (let (new_pid : number) (restart_child spec))
+                  (method-call children set (. spec id) new_pid))))
 
             ("temporary"
               null))))

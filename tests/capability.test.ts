@@ -11,26 +11,26 @@ const CAPABILITY_DEF = `
     (field (id : string) "")
 
     (constructor
-      ((public type       : string)
+      ((public cap_type   : string)
        (public operations : (type-array string))
        (public metadata   : any))
-      (set! (. this id) (method-call crypto randomUUID)))
+      (set! (. this id) (method-call (. globalThis crypto) randomUUID)))
 
     (method can_perform ((operation : string)) (returns boolean)
-      (method-call (. this operations) includes operation)))))
+      (return (method-call (. this operations) includes operation))))))
 
 (export (fn make_log_capability () : Capability
-  (new Capability "log" (array "info" "warn" "error" "debug") (object))))
+  (return (new Capability "log" (array "info" "warn" "error" "debug") (object)))))
 
 (export (fn make_io_capability ((allowed_hosts : (type-array string))) : Capability
-  (new Capability "io" (array "read" "write" "fetch")
-    (object (allowedHosts allowed_hosts)))))
+  (return (new Capability "io" (array "read" "write" "fetch")
+    (object (allowedHosts allowed_hosts))))))
 
 (export (fn make_timer_capability () : Capability
-  (new Capability "timer" (array "sleep" "set_timeout" "set_interval") (object))))
+  (return (new Capability "timer" (array "sleep" "set_timeout" "set_interval") (object)))))
 
 (export (fn make_random_capability () : Capability
-  (new Capability "random" (array "next" "next_int" "next_float") (object))))
+  (return (new Capability "random" (array "next" "next_int" "next_float") (object)))))
 `;
 
 describe('Capability', () => {
@@ -39,7 +39,7 @@ describe('Capability', () => {
       (import (object (named (array (object (name "asrt"))))) "./helpers.js")
       ${CAPABILITY_DEF}
       (let (cap) (new Capability "log" (array "info" "warn") (object)))
-      (asrt (. cap type) "log")
+      (asrt (. cap cap_type) "log")
       (asrt (. (. cap operations) length) 2)
     )`);
   });
@@ -59,7 +59,7 @@ describe('Capability', () => {
       ${CAPABILITY_DEF}
       (let (a) (new Capability "log" (array) (object)))
       (let (b) (new Capability "log" (array) (object)))
-      (asrt (not= (. a id) (. b id)) true)
+      (asrt (!= (. a id) (. b id)) true)
     )`);
   });
 
@@ -89,7 +89,7 @@ describe('Capability', () => {
       (import (object (named (array (object (name "asrt"))))) "./helpers.js")
       ${CAPABILITY_DEF}
       (let (cap) (make_log_capability))
-      (asrt (. cap type) "log")
+      (asrt (. cap cap_type) "log")
       (asrt ((. cap can_perform) "info")  true)
       (asrt ((. cap can_perform) "warn")  true)
       (asrt ((. cap can_perform) "error") true)
@@ -103,7 +103,7 @@ describe('Capability', () => {
       (import (object (named (array (object (name "asrt"))))) "./helpers.js")
       ${CAPABILITY_DEF}
       (let (cap) (make_io_capability (array "example.com")))
-      (asrt (. cap type) "io")
+      (asrt (. cap cap_type) "io")
       (asrt ((. cap can_perform) "fetch") true)
       (asrt (. (. (. cap metadata) allowedHosts) 0) "example.com")
     )`);
@@ -114,7 +114,7 @@ describe('Capability', () => {
       (import (object (named (array (object (name "asrt"))))) "./helpers.js")
       ${CAPABILITY_DEF}
       (let (cap) (make_timer_capability))
-      (asrt (. cap type) "timer")
+      (asrt (. cap cap_type) "timer")
       (asrt ((. cap can_perform) "sleep")        true)
       (asrt ((. cap can_perform) "set_timeout")  true)
       (asrt ((. cap can_perform) "set_interval") true)
@@ -126,7 +126,7 @@ describe('Capability', () => {
       (import (object (named (array (object (name "asrt"))))) "./helpers.js")
       ${CAPABILITY_DEF}
       (let (cap) (make_random_capability))
-      (asrt (. cap type) "random")
+      (asrt (. cap cap_type) "random")
       (asrt ((. cap can_perform) "next")       true)
       (asrt ((. cap can_perform) "next_int")   true)
       (asrt ((. cap can_perform) "next_float") true)

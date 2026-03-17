@@ -1,3 +1,4 @@
+(program
 ;; Layer 1 — Pattern matching utilities.
 ;; Pure functions; no class dependencies.
 ;;
@@ -11,38 +12,33 @@
   "Attempt to match pattern against value.
    Returns a (possibly mutated) bindings object on success, or null on failure.
    'bindings' is passed in so recursive calls accumulate into the same object."
-  (cond
-    ;; Wildcard — always matches, no binding produced
-    ((= pattern "_")
-      bindings)
-
-    ;; JS Symbol — variable binding; stores value under the symbol key
-    ((== (typeof pattern) "symbol")
-      (set! (index bindings pattern) value)
-      bindings)
-
-    ;; Literal (number or string) — exact equality match
-    ((or (== (typeof pattern) "number") (== (typeof pattern) "string"))
-      (if (= pattern value)
-        bindings
-        null))
-
-    ;; Array / tuple pattern — structural match element-by-element
-    ((method-call Array isArray pattern)
-      (if (not (and (method-call Array isArray value)
-                    (= (length pattern) (length value))))
-        null
-        (begin
-          (let (result : (union object null)) bindings)
-          (let (i : number) 0)
-          (while (and result (< i (length pattern)))
-            (set! result
-              (match_pattern (index pattern i) (index value i) result))
-            (set! i (+ i 1)))
-          result)))
-
-    ;; No matching rule — fail
-    (true null)))
+  ;; Wildcard — always matches, no binding produced
+  (if (=== pattern "_")
+    (then (return bindings)))
+  ;; JS Symbol — variable binding; stores value under the symbol key
+  (if (=== (typeof pattern) "symbol")
+    (then (return (method-call Object assign bindings (object ([ pattern ] value))))))
+  ;; Literal (number or string) — exact equality match
+  (if (|| (=== (typeof pattern) "number") (=== (typeof pattern) "string"))
+    (then
+      (if (=== pattern value)
+        (then (return bindings))
+        (else (return null)))))
+  ;; Array / tuple pattern — structural match element-by-element
+  (if (method-call Array isArray pattern)
+    (then
+      (if (! (&& (method-call Array isArray value)
+                  (=== (. pattern length) (. value length))))
+        (then (return null)))
+      (let (result : (union object null)) bindings)
+      (let (i : number) 0)
+      (while (&& result (< i (. pattern length)))
+        (set! result
+          (match_pattern (index pattern i) (index value i) result))
+        (set! i (+ i 1)))
+      (return result)))
+  ;; No matching rule — fail
+  (return null))
 
 
 (fn try_match_patterns ((msg : any) (patterns : (Array any))) : boolean
@@ -50,14 +46,13 @@
    Used in send() to decide whether to wake a blocked task."
   (let (matched : boolean) false)
   (let (i : number) 0)
-  (while (and (not matched) (< i (length patterns)))
+  (while (&& (! matched) (< i (. patterns length)))
     (let (ps : any) (index patterns i))
     (let (bindings : (union object null))
       (match_pattern (. ps pattern) msg (object)))
-    (when bindings
-      (set! matched true))
+    (if bindings (then (set! matched true)))
     (set! i (+ i 1)))
-  matched)
+  (return matched))
 
 
 (fn compute_match_result ((msg : any) (patterns : (Array any))) : (union object null)
@@ -66,15 +61,18 @@
    Used in send() to pre-compute the resume value for a waking task."
   (let (result : (union object null)) null)
   (let (i : number) 0)
-  (while (and (not result) (< i (length patterns)))
+  (while (&& (! result) (< i (. patterns length)))
     (let (ps : any) (index patterns i))
     (let (bindings : (union object null))
       (match_pattern (. ps pattern) msg (object)))
-    (when bindings
-      (set! result
-        (object
-          (matched_pattern_index i)
-          (message               msg)
-          (bindings              bindings))))
+    (if bindings
+      (then
+        (set! result
+          (object
+            (matched_pattern_index i)
+            (message               msg)
+            (bindings              bindings)))))
     (set! i (+ i 1)))
-  result)
+  (return result))
+
+)

@@ -25,16 +25,15 @@ const RING_BUFFER_DEF = `
       (method-call (. this buffer) splice (. this write_index) 1 item)
       (set! (. this write_index) (% (+ (. this write_index) 1) (. this size)))
       (if (< (. this count) (. this size))
-        (begin (set! (. this count) (+ (. this count) 1)))
-        undefined))
+        (then (set! (. this count) (+ (. this count) 1)))))
 
     (method to_array () (returns (type-array any))
       (if (< (. this count) (. this size))
-        (method-call (. this buffer) slice 0 (. this count))
-        (method-call
+        (then (return (method-call (. this buffer) slice 0 (. this count))))
+        (else (return (method-call
           (method-call (. this buffer) slice (. this write_index))
           concat
-          (method-call (. this buffer) slice 0 (. this write_index))))))))
+          (method-call (. this buffer) slice 0 (. this write_index))))))))))
 `;
 
 // ── tests ─────────────────────────────────────────────────────────────────────
