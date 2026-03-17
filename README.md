@@ -1,4 +1,4 @@
-# **t2‑agc Position Statement**  
+# **t2‑agc**  
 
 ### *Why this ecosystem exists, what it stands for, and what it refuses to be*
 
