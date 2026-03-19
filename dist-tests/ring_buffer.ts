@@ -6,7 +6,7 @@ export class RingBuffer {
     this.buffer = new Array(size);
   }
   push(item: any): void {
-    this.buffer.splice(this.write_index, 1, item);
+    this.buffer[this.write_index] = item;
     this.write_index = ((this.write_index + 1) % this.size);
     if ((this.count < this.size)) {
       this.count = (this.count + 1);

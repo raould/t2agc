@@ -10,11 +10,11 @@
       ((public cap_type   : CapabilityType)
        (public operations : (Array string))
        (public metadata   : object))
-      (set! (. this id) (method-call (. globalThis crypto) randomUUID)))
+      (set! (. this id) ((. (. globalThis crypto) randomUUID))))
 
     (method can_perform ((operation : string)) (returns boolean)
       "Return true if this capability allows the given operation."
-      (return (method-call (. this operations) includes operation)))))
+      (return ((. (. this operations) includes) operation)))))
 
 ;; ── Predefined capability constructors ──────────────────────────────────────
 

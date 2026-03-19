@@ -12,7 +12,7 @@
       (set! (. this buffer) (new Array size)))
 
     (method push ((item : any)) (returns void)
-      (method-call (. this buffer) splice (. this write_index) 1 item)
+      ((. this buffer) [(. this write_index)] = item)
       (set! (. this write_index) (% (+ (. this write_index) 1) (. this size)))
       (if (< (. this count) (. this size))
         (then (set! (. this count) (+ (. this count) 1)))))
@@ -20,9 +20,7 @@
     (method to_array () (returns (type-array any))
       "Returns items in chronological (oldest-first) order."
       (if (< (. this count) (. this size))
-        (then (return (method-call (. this buffer) slice 0 (. this count))))
-        (else (return (method-call
-          (method-call (. this buffer) slice (. this write_index))
-          concat
-          (method-call (. this buffer) slice 0 (. this write_index))))))))))
+        (then (return ((. (. this buffer) slice) 0 (. this count))))
+        (else (return ((. ((. (. this buffer) slice) (. this write_index)) concat)
+          ((. (. this buffer) slice) 0 (. this write_index))))))))))
 )

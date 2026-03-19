@@ -70,7 +70,7 @@
   (let (options)
     (take_while
       (lambda ((form))
-        (and (method-call Array isArray form)
+        (and ((. Array isArray) form)
              (== (length form) 2)
              (== (typeof (head form)) "string")))
       options_and_body))
@@ -106,8 +106,8 @@
 ;;     (let (__task_opts) (. counter_fn __t2_task_options))
 ;;     (let (__pid) (spawn counter_fn (array 0 my_cap_log)
 ;;                    (. __task_opts priority) (new Set)))
-;;     (let (__task_inst) (method-call (. (get_global_scheduler) tasks) get __pid))
-;;     (method-call __task_inst configure_mailbox
+;;     (let (__task_inst) ((. (. (get_global_scheduler) tasks) get) __pid))
+;;     ((. __task_inst configure_mailbox)
 ;;       (. __task_opts max_mailbox) (. __task_opts on_overflow))
 ;;     __pid)
 
@@ -123,8 +123,8 @@
         (. __task_opts priority)
         (new Set)))
     (let (__task_inst)
-      (method-call (. (get_global_scheduler) tasks) get __pid))
-    (method-call __task_inst configure_mailbox
+      ((. (. (get_global_scheduler) tasks) get) __pid))
+    ((. __task_inst configure_mailbox)
       (. __task_opts max_mailbox)
       (. __task_opts on_overflow))
     __pid)))
@@ -153,11 +153,11 @@
     (let (tag)    (nth spec 1))
     (let (raw)    (drop 2 spec))
     (let (params) (filter raw (lambda ((p))
-      (not (and (method-call Array isArray p)
+      (not (and ((. Array isArray) p)
                 (== (length p) 2)
                 (== (typeof (head p)) "string"))))))
     (let (opts)   (filter raw (lambda ((p))
-      (and (method-call Array isArray p)
+      (and ((. Array isArray) p)
            (== (length p) 2)
            (== (typeof (head p)) "string")))))
     (object (tag tag) (params params) (opts opts))))
@@ -185,13 +185,13 @@
     (let (tag)     (. info tag))
     (let (params)  (. info params))
     (let (fn_name) (symbol (+ "make_" lower_name "_"
-                              (method-call tag replaceAll "-" "_"))))
+                              ((. tag replaceAll) "-" "_"))))
     (quasi (let (~fn_name)
       (lambda (~@(map params (lambda ((p)) (quasi (~p)))))
         (array ~tag ~@params))))))
 
   (quasi (begin
-    (method-call (. __t2agc__ protocols) set ~proto_name
+    ((. (. __t2agc__ protocols) set) ~proto_name
       (object
         (name     ~proto_name)
         (messages (array ~@(map parsed make_msg_obj)))))
@@ -221,11 +221,11 @@
 
   ;; Extract field name symbol from spec (symbol or (symbol : Type))
   (let (field_sym_of) (lambda ((spec))
-    (if (method-call Array isArray spec) (head spec) spec)))
+    (if ((. Array isArray) spec) (head spec) spec)))
 
   ;; Extract field type from spec (default: any)
   (let (field_type_of) (lambda ((spec))
-    (if (and (method-call Array isArray spec) (> (length spec) 1))
+    (if (and ((. Array isArray) spec) (> (length spec) 1))
       (nth spec 2)
       "any")))
 

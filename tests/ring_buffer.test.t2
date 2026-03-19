@@ -12,5 +12,5 @@
             (asrt (rb.push 3) undefined)
             (asrtDeep (rb.to_array) [1, 2, 3])
             (rb.push 4)
-            (asrtDeep (rb.to_array) [4, 2, 3]))))))
+            (asrtDeep (rb.to_array) [2, 3, 4]))))))
 )

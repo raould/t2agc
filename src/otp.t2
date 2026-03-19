@@ -28,9 +28,9 @@
       (. spec start)
       (array)
       (|| (. spec priority) "normal")
-      (method-call (. spec capabilities) reduce
+      ((. (. spec capabilities) reduce)
         (lambda ((s : (Set Capability)) (c : Capability))
-          (method-call s add c)
+          ((. s add) c)
           s)
         (new Set))))
 
@@ -46,13 +46,13 @@
   (loop
     (receive
       ((array "register" name pid)
-        (method-call names set name pid))
+        ((. names set) name pid))
 
       ((array "unregister" name)
-        (method-call names delete name))
+        ((. names delete) name))
 
       ((array "whereis" name from)
-        (send from (method-call names get name))))
+        (send from ((. names get) name))))
     (yield)
     (recur)))
 
@@ -98,9 +98,9 @@
   (let (update_restart_count)
     (lambda ((child_id : symbol))
       (let (counts : (Array number))
-        (|| (method-call restart_counts get child_id) (array)))
-      (method-call counts push (method-call Date now))
-      (method-call restart_counts set child_id counts)))
+        (|| ((. restart_counts get) child_id) (array)))
+      ((. counts push) ((. Date now)))
+      ((. restart_counts set) child_id counts)))
 
   ;; Helper: find child spec by id
   (let (find_spec)
@@ -117,7 +117,7 @@
   ;; Start all children on init
   (for_each child_specs (lambda ((spec : any))
     (let (pid : number) (restart_child spec))
-    (method-call children set (. spec id) pid)))
+    ((. children set) (. spec id) pid)))
 
   (loop
     (receive
@@ -129,14 +129,14 @@
             ("permanent"
               (update_restart_count child_id)
               (let (new_pid : number) (restart_child spec))
-              (method-call children set (. spec id) new_pid))
+              ((. children set) (. spec id) new_pid))
 
             ("transient"
               (if (!= reason "normal")
                 (then
                   (update_restart_count child_id)
                   (let (new_pid : number) (restart_child spec))
-                  (method-call children set (. spec id) new_pid))))
+                  ((. children set) (. spec id) new_pid))))
 
             ("temporary"
               null))))

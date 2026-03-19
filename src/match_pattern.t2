@@ -17,7 +17,7 @@
     (then (return bindings)))
   ;; JS Symbol — variable binding; stores value under the symbol key
   (if (=== (typeof pattern) "symbol")
-    (then (return (method-call Object assign bindings (object ([ pattern ] value))))))
+    (then (return ((. Object assign) bindings (object ([ pattern ] value))))))
   ;; Literal (number or string) — exact equality match
   (if (|| (=== (typeof pattern) "number") (=== (typeof pattern) "string"))
     (then
@@ -25,9 +25,9 @@
         (then (return bindings))
         (else (return null)))))
   ;; Array / tuple pattern — structural match element-by-element
-  (if (method-call Array isArray pattern)
+  (if ((. Array isArray) pattern)
     (then
-      (if (! (&& (method-call Array isArray value)
+      (if (! (&& ((. Array isArray) value)
                   (=== (. pattern length) (. value length))))
         (then (return null)))
       (let (result : (union object null)) bindings)
