@@ -1,7 +1,7 @@
 (program
 ;; Layer 1 — RingBuffer utility
 ;; Fixed-size circular buffer; oldest entry overwritten when full.
-  (import (object (named (array (object (name "mindex"))))) "./helpers")
+  (import (object (named (array (object (name "mindex"))))) "./array_util")
   (export (class RingBuffer
     (class-body
       (field (buffer      : (type-array any)))

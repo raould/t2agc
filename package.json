@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "npx t2tc --outDir dist src/*.t2",
-    "build-tests": "rimraf dist-tests && npx t2tc --outDir dist-tests src/helpers.t2 && npx t2tc --outDir dist-tests src/ring_buffer.t2 && cp tests/helpers.ts dist-tests/ && npx t2tc --outDir dist-tests tests/*.t2",
+    "build-tests": "rimraf dist-tests && npx t2tc --outDir dist-tests src/array_util.t2 && npx t2tc --outDir dist-tests src/ring_buffer.t2 && npx t2tc --outDir dist-tests tests/*.t2",
     "test": "npm run build-tests && npx vitest run",
     "testnow": "npx vitest run"
   },

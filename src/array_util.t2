@@ -1,0 +1,11 @@
+(program
+    (export (fn mod ((n) (m))
+        (return (% (+ (% n m) m) m))
+    ))
+
+    (export (fn mindex ((arr) (idx))
+        (let* ((jdx (mod idx arr.length)))
+            (return (index arr jdx))
+        )
+    ))
+)

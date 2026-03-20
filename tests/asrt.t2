@@ -1,0 +1,33 @@
+(program
+
+    ; export function asrt(actual: unknown, expected: unknown): void {
+    ;   if (actual !== expected) {
+    ;     throw new Error(`asrt failed: got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
+    ;   }
+    ; }
+
+    (export (fn asrt ((actual) (expected))
+        (if (!= actual expected)
+            (then
+                (throw (new Error (+ "asrt failed: got " (JSON.stringify actual) ", expected " (JSON.stringify expected)))))
+            )
+        )
+    )
+
+    ; export function asrtDeep(actual: unknown, expected: unknown): void {
+    ;   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    ;     throw new Error(
+    ;       `asrtDeep failed:\n  got:      ${JSON.stringify(actual)}\n  expected: ${JSON.stringify(expected)}`,
+    ;     );
+    ;   }
+    ; }
+
+    (export (fn asrtDeep ((actual) (expected))
+        (if (!= (JSON.stringify actual) (JSON.stringify expected))
+            (then
+                (throw (new Error (+ "asrtDeep failed:\n  got:      " (JSON.stringify actual) "\n  expected: " (JSON.stringify expected)))))
+            )
+        )
+    )
+)
+
