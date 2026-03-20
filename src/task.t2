@@ -1,70 +1,72 @@
-;; Layer 2 — Task: a single cooperative execution unit.
-;; Depends on: Priority, TaskStatus, MailboxOverflowPolicy (types.t2),
-;;             RingBuffer (ring_buffer.t2), Capability (capability.t2)
+(program
+  ;; Layer 2 — Task: a single cooperative execution unit.
+  ;; Depends on: Priority, TaskStatus, MailboxOverflowPolicy (types.t2),
+  ;;             RingBuffer (ring_buffer.t2), Capability (capability.t2)
 
-(class Task
-  (class-body
-    ;; Fields not set via constructor shorthand (have defaults or are computed)
-    (field (name                          : string)                   "")
-    (field (status                        : TaskStatus)               "runnable")
-    (field (gen                           : any))                     ;; Generator object
-    (field (budget                        : number)                   100)
-    (field (initial_budget                : number)                   100)
-    (field (mailbox                       : (Array any))              (array))
-    (field (mailbox_max                   : number)                   1000)
-    (field (mailbox_overflow_policy       : MailboxOverflowPolicy)    "drop-oldest")
-    (field (waiting_patterns              : (union (Array any) null)) null)
-    (field (pending_resume                : any))                     ;; resume value for next gen.next()
-    (field (history_effects               : RingBuffer))
-    (field (history_exceptional           : RingBuffer))
-    (field (history_critical              : RingBuffer))
-    (field (created_at                    : number)                   0)
-    (field (total_reductions              : number)                   0)
-    (field (total_messages_sent           : number)                   0)
-    (field (total_messages_received       : number)                   0)
-    (field (mailbox_scan_count            : number)                   0)
-    (field (total_mailbox_scan_operations : number)                   0)
+  (class Task
+    (class-body
+      ;; Fields not set via constructor shorthand (have defaults or are computed)
+      (field (name                          : string)                   "")
+      (field (status                        : TaskStatus)               "runnable")
+      (field (gen                           : any))                     ;; Generator object
+      (field (budget                        : number)                   100)
+      (field (initial_budget                : number)                   100)
+      (field (mailbox                       : (type-array any))              (array))
+      (field (mailbox_max                   : number)                   1000)
+      (field (mailbox_overflow_policy       : MailboxOverflowPolicy)    "drop-oldest")
+      (field (waiting_patterns              : (union (type-array any) null)) null)
+      (field (pending_resume                : any))                     ;; resume value for next gen.next()
+      (field (history_effects               : RingBuffer))
+      (field (history_exceptional           : RingBuffer))
+      (field (history_critical              : RingBuffer))
+      (field (created_at                    : number)                   0)
+      (field (total_reductions              : number)                   0)
+      (field (total_messages_sent           : number)                   0)
+      (field (total_messages_received       : number)                   0)
+      (field (mailbox_scan_count            : number)                   0)
+      (field (total_mailbox_scan_operations : number)                   0)
 
-    ;; id, priority, capabilities use constructor field shorthand
-    (constructor
-      ((public id           : number)
-       (gen_fn              : Function)
-       (args                : (Array any))
-       (public priority     : Priority)
-       (public capabilities : (Set Capability)))
-      (set! this.name                (|| gen_fn.name (+ "task-" (String id))))
-      (set! this.gen                 (apply gen_fn args))
-      (set! this.history_effects     (new RingBuffer 100))
-      (set! this.history_exceptional (new RingBuffer 50))
-      (set! this.history_critical    (new RingBuffer 20))
-      (set! this.created_at          (Date.now)))
+      ;; id, priority, capabilities use constructor field shorthand
+      (constructor
+        ((public id           : number)
+        (gen_fn              : Function)
+        (args                : (type-array any))
+        (public priority     : Priority)
+        (public capabilities : (type-app Set Capability)))
+        (set! this.name                (|| gen_fn.name (+ "task-" (String id))))
+        (set! this.gen                 (apply gen_fn args))
+        (set! this.history_effects     (new RingBuffer 100))
+        (set! this.history_exceptional (new RingBuffer 50))
+        (set! this.history_critical    (new RingBuffer 20))
+        (set! this.created_at          (Date.now)))
 
-    ;; ── History helpers ────────────────────────────────────────────────────
+      ;; ── History helpers ────────────────────────────────────────────────────
 
-    (method record_effect ((capability : Capability) (operation : string) (args : (Array any))) (returns void)
-      (this.history_effects.push
-        (object
-          (timestamp  (Date.now))
-          (capability capability.id)
-          (operation  operation)
-          (args       args))))
+      (method record_effect ((capability : Capability) (operation : string) (args : (type-array any))) (returns void)
+        (this.history_effects.push
+          (object
+            (timestamp  (Date.now))
+            (capability capability.id)
+            (operation  operation)
+            (args       args))))
 
-    (method record_exceptional ((event_type : string) (data : object)) (returns void)
-      (this.history_exceptional.push
-        (object
-          (timestamp (Date.now))
-          (type      event_type)
-          (data      data))))
+      (method record_exceptional ((event_type : string) (data : object)) (returns void)
+        (this.history_exceptional.push
+          (object
+            (timestamp (Date.now))
+            (type      event_type)
+            (data      data))))
 
-    (method record_critical ((code : string) (message : string)) (returns void)
-      (this.history_critical.push
-        (object
-          (timestamp (Date.now))
-          (code      code)
-          (message   message))))
+      (method record_critical ((code : string) (message : string)) (returns void)
+        (this.history_critical.push
+          (object
+            (timestamp (Date.now))
+            (code      code)
+            (message   message))))
 
-    ;; ── Mailbox configuration ──────────────────────────────────────────────
+      ;; ── Mailbox configuration ──────────────────────────────────────────────
 
-    (method configure_mailbox ((max_size : number) (overflow_policy : MailboxOverflowPolicy)) (returns void)
-      (set! this.mailbox_max              max_size)
-      (set! this.mailbox_overflow_policy  overflow_policy))))
+      (method configure_mailbox ((max_size : number) (overflow_policy : MailboxOverflowPolicy)) (returns void)
+        (set! this.mailbox_max              max_size)
+        (set! this.mailbox_overflow_policy  overflow_policy))))
+)
