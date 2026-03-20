@@ -9,17 +9,17 @@
     (field (count       : number) 0)
 
     (constructor ((public size : number))
-      (set! (. this buffer) (new Array size)))
+      (set! this.buffer (new Array size)))
 
     (method push ((item : any)) (returns void)
       (this.buffer [this.write_index] = item)
-      (set! (. this write_index) (% (+ this.write_index 1) this.size))
+      (set! this.write_index (% (+ this.write_index 1) this.size))
       (if (< this.count this.size)
-        (then (set! (. this count) (+ this.count 1)))))
+        (then (set! this.count (+ this.count 1)))))
 
     (method to_array () (returns (type-array any))
       "Returns items in chronological (oldest-first) order."
-      (if (< (. this count) (. this size))
+      (if (< this.count this.size)
         (then (return (this.buffer.slice 0 this.count)))
         (else (return ((. (this.buffer.slice this.write_index) concat)
           (this.buffer.slice 0 this.write_index))))))))))

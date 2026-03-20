@@ -25,12 +25,12 @@
   ;; NOTE: in practice the caller (supervisor loop) closes over these maps.
   (let (pid : number)
     (spawn
-      (. spec start)
+      spec.start
       (array)
-      (|| (. spec priority) "normal")
-      ((. (. spec capabilities) reduce)
+      (|| spec.priority "normal")
+      (spec.capabilities.reduce
         (lambda ((s : (Set Capability)) (c : Capability))
-          ((. s add) c)
+          (s.add c)
           s)
         (new Set))))
 
@@ -46,13 +46,13 @@
   (loop
     (receive
       ((array "register" name pid)
-        ((. names set) name pid))
+        (names.set name pid))
 
       ((array "unregister" name)
-        ((. names delete) name))
+        (names.delete name))
 
       ((array "whereis" name from)
-        (send from ((. names get) name))))
+        (send from (names.get name))))
     (yield)
     (recur)))
 
@@ -98,18 +98,18 @@
   (let (update_restart_count)
     (lambda ((child_id : symbol))
       (let (counts : (Array number))
-        (|| ((. restart_counts get) child_id) (array)))
-      ((. counts push) ((. Date now)))
-      ((. restart_counts set) child_id counts)))
+        (|| (restart_counts.get child_id) (array)))
+      (counts.push (Date.now))
+      (restart_counts.set child_id counts)))
 
   ;; Helper: find child spec by id
   (let (find_spec)
     (lambda ((child_id : symbol))
       (let (found : any) null)
       (let (i : number) 0)
-      (while (&& (! found) (< i (. child_specs length)))
+      (while (&& (! found) (< i child_specs.length))
         (let (spec : any) (index child_specs i))
-        (if (== (. spec id) child_id)
+        (if (== spec.id child_id)
           (then (set! found spec)))
         (set! i (+ i 1)))
       found))
@@ -117,7 +117,7 @@
   ;; Start all children on init
   (for_each child_specs (lambda ((spec : any))
     (let (pid : number) (restart_child spec))
-    ((. children set) (. spec id) pid)))
+    (children.set spec.id pid)))
 
   (loop
     (receive
@@ -125,18 +125,18 @@
       ((array "exit" child_id reason)
         (let (spec : any) (find_spec child_id))
         (if spec
-          (then (match (. spec restart_policy)
+          (then (match spec.restart_policy
             ("permanent"
               (update_restart_count child_id)
               (let (new_pid : number) (restart_child spec))
-              ((. children set) (. spec id) new_pid))
+              (children.set spec.id new_pid))
 
             ("transient"
               (if (!= reason "normal")
                 (then
                   (update_restart_count child_id)
                   (let (new_pid : number) (restart_child spec))
-                  ((. children set) (. spec id) new_pid))))
+                  (children.set spec.id new_pid))))
 
             ("temporary"
               null))))

@@ -17,7 +17,7 @@
     (then (return bindings)))
   ;; JS Symbol — variable binding; stores value under the symbol key
   (if (=== (typeof pattern) "symbol")
-    (then (return ((. Object assign) bindings (object ([ pattern ] value))))))
+    (then (return (Object.assign bindings (object ([ pattern ] value))))))
   ;; Literal (number or string) — exact equality match
   (if (|| (=== (typeof pattern) "number") (=== (typeof pattern) "string"))
     (then
@@ -25,14 +25,14 @@
         (then (return bindings))
         (else (return null)))))
   ;; Array / tuple pattern — structural match element-by-element
-  (if ((. Array isArray) pattern)
+  (if (Array.isArray pattern)
     (then
-      (if (! (&& ((. Array isArray) value)
-                  (=== (. pattern length) (. value length))))
+      (if (! (&& (Array.isArray value)
+                  (=== pattern.length value.length)))
         (then (return null)))
       (let (result : (union object null)) bindings)
       (let (i : number) 0)
-      (while (&& result (< i (. pattern length)))
+      (while (&& result (< i pattern.length))
         (set! result
           (match_pattern (index pattern i) (index value i) result))
         (set! i (+ i 1)))
@@ -46,10 +46,10 @@
    Used in send() to decide whether to wake a blocked task."
   (let (matched : boolean) false)
   (let (i : number) 0)
-  (while (&& (! matched) (< i (. patterns length)))
+  (while (&& (! matched) (< i patterns.length))
     (let (ps : any) (index patterns i))
     (let (bindings : (union object null))
-      (match_pattern (. ps pattern) msg (object)))
+      (match_pattern ps.pattern msg (object)))
     (if bindings (then (set! matched true)))
     (set! i (+ i 1)))
   (return matched))
@@ -61,10 +61,10 @@
    Used in send() to pre-compute the resume value for a waking task."
   (let (result : (union object null)) null)
   (let (i : number) 0)
-  (while (&& (! result) (< i (. patterns length)))
+  (while (&& (! result) (< i patterns.length))
     (let (ps : any) (index patterns i))
     (let (bindings : (union object null))
-      (match_pattern (. ps pattern) msg (object)))
+      (match_pattern ps.pattern msg (object)))
     (if bindings
       (then
         (set! result

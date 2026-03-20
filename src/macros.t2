@@ -36,7 +36,7 @@
         (object
           (type     "receive")
           (patterns (array ~@patterns)))))
-    (switch (. __receive_result matched_pattern_index)
+    (switch __receive_result.matched_pattern_index
       ~@(map_indexed clauses (lambda ((i) (clause))
           (quasi (case ~i ~@(tail clause)))))))))
 
@@ -70,7 +70,7 @@
   (let (options)
     (take_while
       (lambda ((form))
-        (and ((. Array isArray) form)
+        (and (Array.isArray form)
              (== (length form) 2)
              (== (typeof (head form)) "string")))
       options_and_body))
@@ -117,16 +117,16 @@
    __t2_task_options property (set at definition time by the task macro)."
   (let (fn_sym) (symbol (+ (string task_name) "_fn")))
   (quasi (begin
-    (let (__task_opts) (. ~fn_sym __t2_task_options))
+    (let (__task_opts) ~fn_sym.__t2_task_options)
     (let (__pid)
       (spawn ~fn_sym ~args
-        (. __task_opts priority)
+        __task_opts.priority
         (new Set)))
     (let (__task_inst)
-      ((. (. (get_global_scheduler) tasks) get) __pid))
-    ((. __task_inst configure_mailbox)
-      (. __task_opts max_mailbox)
-      (. __task_opts on_overflow))
+      ((. (get_global_scheduler) tasks.get) __pid))
+    (__task_inst.configure_mailbox
+      __task_opts.max_mailbox
+      __task_opts.on_overflow)
     __pid)))
 
 
@@ -153,11 +153,11 @@
     (let (tag)    (nth spec 1))
     (let (raw)    (drop 2 spec))
     (let (params) (filter raw (lambda ((p))
-      (not (and ((. Array isArray) p)
+      (not (and (Array.isArray p)
                 (== (length p) 2)
                 (== (typeof (head p)) "string"))))))
     (let (opts)   (filter raw (lambda ((p))
-      (and ((. Array isArray) p)
+      (and (Array.isArray p)
            (== (length p) 2)
            (== (typeof (head p)) "string")))))
     (object (tag tag) (params params) (opts opts))))
@@ -166,9 +166,9 @@
 
   ;; Build the protocol message descriptor object for one spec
   (let (make_msg_obj) (lambda ((info))
-    (let (tag)    (. info tag))
-    (let (params) (. info params))
-    (let (reply)  (get_option (. info opts) "reply_shape"))
+    (let (tag)    info.tag)
+    (let (params) info.params)
+    (let (reply)  (get_option info.opts "reply_shape"))
     (if reply
       (quasi (object
         (tag         ~tag)
@@ -182,16 +182,16 @@
 
   ;; Build a constructor binding for one spec
   (let (make_ctor) (lambda ((info))
-    (let (tag)     (. info tag))
-    (let (params)  (. info params))
+    (let (tag)     info.tag)
+    (let (params)  info.params)
     (let (fn_name) (symbol (+ "make_" lower_name "_"
-                              ((. tag replaceAll) "-" "_"))))
+                              (tag.replaceAll "-" "_"))))
     (quasi (let (~fn_name)
       (lambda (~@(map params (lambda ((p)) (quasi (~p)))))
         (array ~tag ~@params))))))
 
   (quasi (begin
-    ((. (. __t2agc__ protocols) set) ~proto_name
+    (__t2agc__.protocols.set ~proto_name
       (object
         (name     ~proto_name)
         (messages (array ~@(map parsed make_msg_obj)))))
@@ -221,11 +221,11 @@
 
   ;; Extract field name symbol from spec (symbol or (symbol : Type))
   (let (field_sym_of) (lambda ((spec))
-    (if ((. Array isArray) spec) (head spec) spec)))
+    (if (Array.isArray spec) (head spec) spec)))
 
   ;; Extract field type from spec (default: any)
   (let (field_type_of) (lambda ((spec))
-    (if (and ((. Array isArray) spec) (> (length spec) 1))
+    (if (and (Array.isArray spec) (> (length spec) 1))
       (nth spec 2)
       "any")))
 
@@ -255,11 +255,11 @@
         (let (fsym)    (field_sym_of spec))
         (let (acc_sym) (symbol (+ lower_name "_" (string fsym))))
         (quasi (let (~acc_sym)
-          (lambda ((__inst)) (. __inst ~fsym))))))
+          (lambda ((__inst)) __inst.~fsym)))))
 
     ;; Predicate: <name>?(obj)
     (let (~pred_sym)
       (lambda ((__obj))
         (and (!= __obj null)
              (== (typeof __obj) "object")
-             (== (. __obj __opaque_tag) (symbol ~name_str))))))))
+             (== __obj.__opaque_tag (symbol ~name_str))))))))

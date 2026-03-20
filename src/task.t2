@@ -32,39 +32,39 @@
        (args                : (Array any))
        (public priority     : Priority)
        (public capabilities : (Set Capability)))
-      (set! (. this name)                (|| (. gen_fn name) (+ "task-" (String id))))
-      (set! (. this gen)                 (apply gen_fn args))
-      (set! (. this history_effects)     (new RingBuffer 100))
-      (set! (. this history_exceptional) (new RingBuffer 50))
-      (set! (. this history_critical)    (new RingBuffer 20))
-      (set! (. this created_at)          ((. Date now))))
+      (set! this.name                (|| gen_fn.name (+ "task-" (String id))))
+      (set! this.gen                 (apply gen_fn args))
+      (set! this.history_effects     (new RingBuffer 100))
+      (set! this.history_exceptional (new RingBuffer 50))
+      (set! this.history_critical    (new RingBuffer 20))
+      (set! this.created_at          (Date.now)))
 
     ;; ── History helpers ────────────────────────────────────────────────────
 
     (method record_effect ((capability : Capability) (operation : string) (args : (Array any))) (returns void)
-      ((. (. this history_effects) push)
+      (this.history_effects.push
         (object
-          (timestamp  ((. Date now)))
-          (capability (. capability id))
+          (timestamp  (Date.now))
+          (capability capability.id)
           (operation  operation)
           (args       args))))
 
     (method record_exceptional ((event_type : string) (data : object)) (returns void)
-      ((. (. this history_exceptional) push)
+      (this.history_exceptional.push
         (object
-          (timestamp ((. Date now)))
+          (timestamp (Date.now))
           (type      event_type)
           (data      data))))
 
     (method record_critical ((code : string) (message : string)) (returns void)
-      ((. (. this history_critical) push)
+      (this.history_critical.push
         (object
-          (timestamp ((. Date now)))
+          (timestamp (Date.now))
           (code      code)
           (message   message))))
 
     ;; ── Mailbox configuration ──────────────────────────────────────────────
 
     (method configure_mailbox ((max_size : number) (overflow_policy : MailboxOverflowPolicy)) (returns void)
-      (set! (. this mailbox_max)              max_size)
-      (set! (. this mailbox_overflow_policy)  overflow_policy))))
+      (set! this.mailbox_max              max_size)
+      (set! this.mailbox_overflow_policy  overflow_policy))))
