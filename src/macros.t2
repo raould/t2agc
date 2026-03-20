@@ -1,265 +1,267 @@
-;; Layer 5 — Macros & syntactic sugar.
-;; Depends on: spawn, receive, __t2agc__ global (runtime.t2)
+(program
+  ;; Layer 5 — Macros & syntactic sugar.
+  ;; Depends on: spawn, receive, __t2agc__ global (runtime.t2)
 
-;; ── defmacro receive ──────────────────────────────────────────────────────────
-;;
-;; Selective receive sugar.  Each clause is (pattern body...).
-;; Expands to: yield a 'receive' primitive with the pattern array, then
-;; switch on matched_pattern_index to run the matching body.
-;;
-;; Example:
-;;   (receive
-;;     ((array "ok" v) (process v))
-;;     (_ (drop_unknown)))
-;;
-;; Expands to:
-;;   (begin
-;;     (let (__receive_result)
-;;       (yield (object (type "receive")
-;;                      (patterns (array
-;;                        (object (pattern (array "ok" v)))
-;;                        (object (pattern _)))))))
-;;     (switch (. __receive_result matched_pattern_index)
-;;       (case 0 (process v))
-;;       (case 1 (drop_unknown))))
+  ;; ── defmacro receive ──────────────────────────────────────────────────────────
+  ;;
+  ;; Selective receive sugar.  Each clause is (pattern body...).
+  ;; Expands to: yield a 'receive' primitive with the pattern array, then
+  ;; switch on matched_pattern_index to run the matching body.
+  ;;
+  ;; Example:
+  ;;   (receive
+  ;;     ((array "ok" v) (process v))
+  ;;     (_ (drop_unknown)))
+  ;;
+  ;; Expands to:
+  ;;   (begin
+  ;;     (let (__receive_result)
+  ;;       (yield (object (type "receive")
+  ;;                      (patterns (array
+  ;;                        (object (pattern (array "ok" v)))
+  ;;                        (object (pattern _)))))))
+  ;;     (switch (. __receive_result matched_pattern_index)
+  ;;       (case 0 (process v))
+  ;;       (case 1 (drop_unknown))))
 
-(defmacro receive ((rest clauses))
-  "Selective receive — scan mailbox for first matching pattern.
-   Each clause is (pattern body...).  Yields a 'receive' primitive;
-   scheduler resumes the task with a match-result object."
-  (let (patterns)
-    (map clauses (lambda ((clause))
-      (quasi (object (pattern ~(head clause)))))))
-  (quasi (begin
-    (let (__receive_result)
-      (yield
-        (object
-          (type     "receive")
-          (patterns (array ~@patterns)))))
-    (switch __receive_result.matched_pattern_index
-      ~@(map_indexed clauses (lambda ((i) (clause))
-          (quasi (case ~i ~@(tail clause)))))))))
-
-
-;; ── defmacro task ─────────────────────────────────────────────────────────────
-;;
-;; Defines a named task generator function with options metadata.
-;; Leading 2-element string-keyed tuples in the body are treated as options.
-;;
-;; Example:
-;;   (task counter (initial_value cap_log)
-;;     ("priority"    "high")
-;;     ("max_mailbox" 500)
-;;     (let state initial_value)
-;;     (loop ...))
-;;
-;; Expands to:
-;;   (let (counter_fn)
-;;     (generator-fn (initial_value cap_log)
-;;       (begin
-;;         (set! (. (current_generator) __t2_task_options)
-;;           (object (priority "high") (max_mailbox 500) ...))
-;;         (let state initial_value)
-;;         (loop ...))))
-
-(defmacro task ((name) (params) (rest options_and_body))
-  "Define a task as a named generator function with option metadata.
-   Leading ('key' value) pairs become task options; the rest is the body."
-
-  ;; Options are leading forms of shape ("key" value)
-  (let (options)
-    (take_while
-      (lambda ((form))
-        (and (Array.isArray form)
-             (== (length form) 2)
-             (== (typeof (head form)) "string")))
-      options_and_body))
-  (let (body) (drop (length options) options_and_body))
-
-  ;; Extract known options with defaults
-  (let (priority)    (or (get_option options "priority")    "normal"))
-  (let (max_mailbox) (or (get_option options "max_mailbox") 1000))
-  (let (on_overflow) (or (get_option options "on_overflow") "drop-oldest"))
-  (let (protocol)    (get_option options "protocol"))
-
-  (quasi (let (~(symbol (+ (string name) "_fn")))
-    (generator-fn ~params
-      (begin
-        (set! (. (current_generator) __t2_task_options)
+  (defmacro receive ((rest clauses))
+    ; "Selective receive — scan mailbox for first matching pattern.
+    ; Each clause is (pattern body...).  Yields a 'receive' primitive;
+    ; scheduler resumes the task with a match-result object."
+    (let (patterns)
+      (map clauses (lambda ((clause))
+        (quasi (object (pattern ~(head clause)))))))
+    (quasi (begin
+      (let (__receive_result)
+        (yield
           (object
-            (priority    ~priority)
-            (max_mailbox ~max_mailbox)
-            (on_overflow ~on_overflow)
-            (protocol    ~protocol)))
-        ~@body)))))
+            (type     "receive")
+            (patterns (array ~@patterns)))))
+      (switch __receive_result.matched_pattern_index
+        ~@(map_indexed clauses (lambda ((i) (clause))
+            (quasi (case ~i ~@(tail clause)))))))))
 
 
-;; ── defmacro spawn_task ───────────────────────────────────────────────────────
-;;
-;; Spawns a task defined with the task macro, reading its stored options.
-;;
-;; Example:
-;;   (spawn_task counter (array 0 my_cap_log))
-;;
-;; Expands to:
-;;   (begin
-;;     (let (__task_opts) (. counter_fn __t2_task_options))
-;;     (let (__pid) (spawn counter_fn (array 0 my_cap_log)
-;;                    (. __task_opts priority) (new Set)))
-;;     (let (__task_inst) ((. (. (get_global_scheduler) tasks) get) __pid))
-;;     ((. __task_inst configure_mailbox)
-;;       (. __task_opts max_mailbox) (. __task_opts on_overflow))
-;;     __pid)
+  ;; ── defmacro task ─────────────────────────────────────────────────────────────
+  ;;
+  ;; Defines a named task generator function with options metadata.
+  ;; Leading 2-element string-keyed tuples in the body are treated as options.
+  ;;
+  ;; Example:
+  ;;   (task counter (initial_value cap_log)
+  ;;     ("priority"    "high")
+  ;;     ("max_mailbox" 500)
+  ;;     (let state initial_value)
+  ;;     (loop ...))
+  ;;
+  ;; Expands to:
+  ;;   (let (counter_fn)
+  ;;     (generator-fn (initial_value cap_log)
+  ;;       (begin
+  ;;         (set! (. (current_generator) __t2_task_options)
+  ;;           (object (priority "high") (max_mailbox 500) ...))
+  ;;         (let state initial_value)
+  ;;         (loop ...))))
 
-(defmacro spawn_task ((task_name) (args))
-  "Spawn a task defined with the task macro.
-   Priority and mailbox settings are read from the generator function's
-   __t2_task_options property (set at definition time by the task macro)."
-  (let (fn_sym) (symbol (+ (string task_name) "_fn")))
-  (quasi (begin
-    (let (__task_opts) ~fn_sym.__t2_task_options)
-    (let (__pid)
-      (spawn ~fn_sym ~args
-        __task_opts.priority
-        (new Set)))
-    (let (__task_inst)
-      ((. (get_global_scheduler) tasks.get) __pid))
-    (__task_inst.configure_mailbox
-      __task_opts.max_mailbox
-      __task_opts.on_overflow)
-    __pid)))
+  (defmacro task ((name) (params) (rest options_and_body))
+    ; "Define a task as a named generator function with option metadata.
+    Leading ('key' value) pairs become task options; the rest is the body."
 
+    ;; Options are leading forms of shape ("key" value)
+    (let (options)
+      (take_while
+        (lambda ((form))
+          (and (Array.isArray form)
+              (== (length form) 2)
+              (== (typeof (head form)) "string")))
+        options_and_body))
+    (let (body) (drop (length options) options_and_body))
 
-;; ── defmacro defprotocol ─────────────────────────────────────────────────────
-;;
-;; Registers a message protocol in __t2agc__.protocols and generates
-;; per-message constructor functions.
-;;
-;; Example:
-;;   (defprotocol Counter
-;;     (array "inc" n)
-;;     (array "get" from ("reply_shape" "integer"))
-;;     (array "reset"))
+    ;; Extract known options with defaults
+    (let (priority)    (or (get_option options "priority")    "normal"))
+    (let (max_mailbox) (or (get_option options "max_mailbox") 1000))
+    (let (on_overflow) (or (get_option options "on_overflow") "drop-oldest"))
+    (let (protocol)    (get_option options "protocol"))
 
-(defmacro defprotocol ((name) (rest message_specs))
-  "Define a typed message protocol and store it in the global registry.
-   Generates make_<protocol>_<tag> constructor functions."
-
-  (let (proto_name) (string name))
-  (let (lower_name) (string_lower proto_name))
-
-  ;; Helper: parse a spec into { tag, params, opts }
-  (let (parse_spec) (lambda ((spec))
-    (let (tag)    (nth spec 1))
-    (let (raw)    (drop 2 spec))
-    (let (params) (filter raw (lambda ((p))
-      (not (and (Array.isArray p)
-                (== (length p) 2)
-                (== (typeof (head p)) "string"))))))
-    (let (opts)   (filter raw (lambda ((p))
-      (and (Array.isArray p)
-           (== (length p) 2)
-           (== (typeof (head p)) "string")))))
-    (object (tag tag) (params params) (opts opts))))
-
-  (let (parsed) (map message_specs parse_spec))
-
-  ;; Build the protocol message descriptor object for one spec
-  (let (make_msg_obj) (lambda ((info))
-    (let (tag)    info.tag)
-    (let (params) info.params)
-    (let (reply)  (get_option info.opts "reply_shape"))
-    (if reply
-      (quasi (object
-        (tag         ~tag)
-        (arity       ~(length params))
-        (params      (array ~@(map params string)))
-        (reply_shape ~reply)))
-      (quasi (object
-        (tag    ~tag)
-        (arity  ~(length params))
-        (params (array ~@(map params string))))))))
-
-  ;; Build a constructor binding for one spec
-  (let (make_ctor) (lambda ((info))
-    (let (tag)     info.tag)
-    (let (params)  info.params)
-    (let (fn_name) (symbol (+ "make_" lower_name "_"
-                              (tag.replaceAll "-" "_"))))
-    (quasi (let (~fn_name)
-      (lambda (~@(map params (lambda ((p)) (quasi (~p)))))
-        (array ~tag ~@params))))))
-
-  (quasi (begin
-    (__t2agc__.protocols.set ~proto_name
-      (object
-        (name     ~proto_name)
-        (messages (array ~@(map parsed make_msg_obj)))))
-    ~@(map parsed make_ctor))))
+    (quasi (let (~(symbol (+ (string name) "_fn")))
+      (generator-fn ~params
+        (begin
+          (set! (. (current_generator) __t2_task_options)
+            (object
+              (priority    ~priority)
+              (max_mailbox ~max_mailbox)
+              (on_overflow ~on_overflow)
+              (protocol    ~protocol)))
+          ~@body)))))
 
 
-;; ── defmacro defopaque ────────────────────────────────────────────────────────
-;;
-;; Defines an opaque type with encapsulated fields, a smart constructor,
-;; per-field accessors, and a predicate.
-;;
-;; Example:
-;;   (defopaque Counter (value))
-;;
-;; Generates: __Counter class, make_counter, counter_value, counter?
+  ;; ── defmacro spawn_task ───────────────────────────────────────────────────────
+  ;;
+  ;; Spawns a task defined with the task macro, reading its stored options.
+  ;;
+  ;; Example:
+  ;;   (spawn_task counter (array 0 my_cap_log))
+  ;;
+  ;; Expands to:
+  ;;   (begin
+  ;;     (let (__task_opts) (. counter_fn __t2_task_options))
+  ;;     (let (__pid) (spawn counter_fn (array 0 my_cap_log)
+  ;;                    (. __task_opts priority) (new Set)))
+  ;;     (let (__task_inst) ((. (. (get_global_scheduler) tasks) get) __pid))
+  ;;     ((. __task_inst configure_mailbox)
+  ;;       (. __task_opts max_mailbox) (. __task_opts on_overflow))
+  ;;     __pid)
 
-(defmacro defopaque ((name) (rest fields))
-  "Define an opaque type.  Each field spec is either a symbol or (symbol : Type).
-   Generates: private class __<Name>, constructor make_<name>,
-   accessors <name>_<field>, and predicate <name>?."
+  (defmacro spawn_task ((task_name) (args))
+    ; "Spawn a task defined with the task macro.
+    ; Priority and mailbox settings are read from the generator function's
+    ; __t2_task_options property (set at definition time by the task macro)."
+    (let (fn_sym) (symbol (+ (string task_name) "_fn")))
+    (quasi (begin
+      (let (__task_opts) ~fn_sym.__t2_task_options)
+      (let (__pid)
+        (spawn ~fn_sym ~args
+          __task_opts.priority
+          (new Set)))
+      (let (__task_inst)
+        ((. (get_global_scheduler) tasks.get) __pid))
+      (__task_inst.configure_mailbox
+        __task_opts.max_mailbox
+        __task_opts.on_overflow)
+      __pid)))
 
-  (let (name_str)   (string name))
-  (let (lower_name) (string_lower name_str))
-  (let (class_sym)  (symbol (+ "__" name_str)))
-  (let (ctor_sym)   (symbol (+ "make_" lower_name)))
-  (let (pred_sym)   (symbol (+ lower_name "?")))
 
-  ;; Extract field name symbol from spec (symbol or (symbol : Type))
-  (let (field_sym_of) (lambda ((spec))
-    (if (Array.isArray spec) (head spec) spec)))
+  ;; ── defmacro defprotocol ─────────────────────────────────────────────────────
+  ;;
+  ;; Registers a message protocol in __t2agc__.protocols and generates
+  ;; per-message constructor functions.
+  ;;
+  ;; Example:
+  ;;   (defprotocol Counter
+  ;;     (array "inc" n)
+  ;;     (array "get" from ("reply_shape" "integer"))
+  ;;     (array "reset"))
 
-  ;; Extract field type from spec (default: any)
-  (let (field_type_of) (lambda ((spec))
-    (if (and (Array.isArray spec) (> (length spec) 1))
-      (nth spec 2)
-      "any")))
+  (defmacro defprotocol ((name) (rest message_specs))
+    ; "Define a typed message protocol and store it in the global registry.
+    ; Generates make_<protocol>_<tag> constructor functions."
 
-  (quasi (begin
-    ;; Private backing class (not exported)
-    (class ~class_sym
-      (class-body
-        ~@(map fields (lambda ((spec))
-            (let (fsym)  (field_sym_of spec))
-            (let (ftype) (field_type_of spec))
-            (quasi (field (~fsym : ~ftype)))))
-        (field (__opaque_tag : symbol))))
+    (let (proto_name) (string name))
+    (let (lower_name) (string_lower proto_name))
 
-    ;; Constructor: make_<name>(fields...)
-    (let (~ctor_sym)
-      (lambda (~@(map fields (lambda ((spec))
-                  (quasi (~(field_sym_of spec))))))
-        (let (__inst) (new ~class_sym))
-        ~@(map fields (lambda ((spec))
-            (let (fsym) (field_sym_of spec))
-            (quasi (set! (. __inst ~fsym) ~fsym))))
-        (set! (. __inst __opaque_tag) (symbol ~name_str))
-        __inst))
+    ;; Helper: parse a spec into { tag, params, opts }
+    (let (parse_spec) (lambda ((spec))
+      (let (tag)    (nth spec 1))
+      (let (raw)    (drop 2 spec))
+      (let (params) (filter raw (lambda ((p))
+        (not (and (Array.isArray p)
+                  (== (length p) 2)
+                  (== (typeof (head p)) "string"))))))
+      (let (opts)   (filter raw (lambda ((p))
+        (and (Array.isArray p)
+            (== (length p) 2)
+            (== (typeof (head p)) "string")))))
+      (object (tag tag) (params params) (opts opts))))
 
-    ;; Per-field accessors: <name>_<field>(instance)
-    ~@(map fields (lambda ((spec))
-        (let (fsym)    (field_sym_of spec))
-        (let (acc_sym) (symbol (+ lower_name "_" (string fsym))))
-        (quasi (let (~acc_sym)
-          (lambda ((__inst)) __inst.~fsym)))))
+    (let (parsed) (map message_specs parse_spec))
 
-    ;; Predicate: <name>?(obj)
-    (let (~pred_sym)
-      (lambda ((__obj))
-        (and (!= __obj null)
-             (== (typeof __obj) "object")
-             (== __obj.__opaque_tag (symbol ~name_str))))))))
+    ;; Build the protocol message descriptor object for one spec
+    (let (make_msg_obj) (lambda ((info))
+      (let (tag)    info.tag)
+      (let (params) info.params)
+      (let (reply)  (get_option info.opts "reply_shape"))
+      (if reply
+        (quasi (object
+          (tag         ~tag)
+          (arity       ~(length params))
+          (params      (array ~@(map params string)))
+          (reply_shape ~reply)))
+        (quasi (object
+          (tag    ~tag)
+          (arity  ~(length params))
+          (params (array ~@(map params string))))))))
+
+    ;; Build a constructor binding for one spec
+    (let (make_ctor) (lambda ((info))
+      (let (tag)     info.tag)
+      (let (params)  info.params)
+      (let (fn_name) (symbol (+ "make_" lower_name "_"
+                                (tag.replaceAll "-" "_"))))
+      (quasi (let (~fn_name)
+        (lambda (~@(map params (lambda ((p)) (quasi (~p)))))
+          (array ~tag ~@params))))))
+
+    (quasi (begin
+      (__t2agc__.protocols.set ~proto_name
+        (object
+          (name     ~proto_name)
+          (messages (array ~@(map parsed make_msg_obj)))))
+      ~@(map parsed make_ctor))))
+
+
+  ;; ── defmacro defopaque ────────────────────────────────────────────────────────
+  ;;
+  ;; Defines an opaque type with encapsulated fields, a smart constructor,
+  ;; per-field accessors, and a predicate.
+  ;;
+  ;; Example:
+  ;;   (defopaque Counter (value))
+  ;;
+  ;; Generates: __Counter class, make_counter, counter_value, counter?
+
+  (defmacro defopaque ((name) (rest fields))
+    ; "Define an opaque type.  Each field spec is either a symbol or (symbol : Type).
+    ; Generates: private class __<Name>, constructor make_<name>,
+    ; accessors <name>_<field>, and predicate <name>?."
+
+    (let (name_str)   (string name))
+    (let (lower_name) (string_lower name_str))
+    (let (class_sym)  (symbol (+ "__" name_str)))
+    (let (ctor_sym)   (symbol (+ "make_" lower_name)))
+    (let (pred_sym)   (symbol (+ lower_name "?")))
+
+    ;; Extract field name symbol from spec (symbol or (symbol : Type))
+    (let (field_sym_of) (lambda ((spec))
+      (if (Array.isArray spec) (head spec) spec)))
+
+    ;; Extract field type from spec (default: any)
+    (let (field_type_of) (lambda ((spec))
+      (if (and (Array.isArray spec) (> (length spec) 1))
+        (nth spec 2)
+        "any")))
+
+    (quasi (begin
+      ;; Private backing class (not exported)
+      (class ~class_sym
+        (class-body
+          ~@(map fields (lambda ((spec))
+              (let (fsym)  (field_sym_of spec))
+              (let (ftype) (field_type_of spec))
+              (quasi (field (~fsym : ~ftype)))))
+          (field (__opaque_tag : symbol))))
+
+      ;; Constructor: make_<name>(fields...)
+      (let (~ctor_sym)
+        (lambda (~@(map fields (lambda ((spec))
+                    (quasi (~(field_sym_of spec))))))
+          (let (__inst) (new ~class_sym))
+          ~@(map fields (lambda ((spec))
+              (let (fsym) (field_sym_of spec))
+              (quasi (set! (. __inst ~fsym) ~fsym))))
+          (set! (. __inst __opaque_tag) (symbol ~name_str))
+          __inst))
+
+      ;; Per-field accessors: <name>_<field>(instance)
+      ~@(map fields (lambda ((spec))
+          (let (fsym)    (field_sym_of spec))
+          (let (acc_sym) (symbol (+ lower_name "_" (string fsym))))
+          (quasi (let (~acc_sym)
+            (lambda ((__inst)) __inst.~fsym)))))
+
+      ;; Predicate: <name>?(obj)
+      (let (~pred_sym)
+        (lambda ((__obj))
+          (and (!= __obj null)
+              (== (typeof __obj) "object")
+              (== __obj.__opaque_tag (symbol ~name_str))))))))
+)

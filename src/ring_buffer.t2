@@ -23,7 +23,7 @@
       )
 
       (method to_array () (returns (type-array any))
-        "Returns items in chronological (oldest-first) order."
+        ; Returns items in chronological (oldest-first) order.
         (let (output : (type-array any)) (array))
         (for (i 0) (< i this.count) (+ i 1)
             (let* ((j (+ (- this.write_index this.count) i))

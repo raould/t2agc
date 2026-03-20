@@ -1,78 +1,79 @@
 (program
-;; Layer 1 — Pattern matching utilities.
-;; Pure functions; no class dependencies.
-;;
-;; Pattern types:
-;;   "_"            — wildcard, matches anything, no binding
-;;   symbol         — JS Symbol; matches anything, binds value under that key
-;;   number/string  — literal; must equal value exactly
-;;   array          — structural; recursively matches each element
+  ;; Layer 1 — Pattern matching utilities.
+  ;; Pure functions; no class dependencies.
+  ;;
+  ;; Pattern types:
+  ;;   "_"            — wildcard, matches anything, no binding
+  ;;   symbol         — JS Symbol; matches anything, binds value under that key
+  ;;   number/string  — literal; must equal value exactly
+  ;;   array          — structural; recursively matches each element
 
-(fn match_pattern ((pattern : any) (value : any) (bindings : object)) : (union object null)
-  "Attempt to match pattern against value.
-   Returns a (possibly mutated) bindings object on success, or null on failure.
-   'bindings' is passed in so recursive calls accumulate into the same object."
-  ;; Wildcard — always matches, no binding produced
-  (if (=== pattern "_")
-    (then (return bindings)))
-  ;; JS Symbol — variable binding; stores value under the symbol key
-  (if (=== (typeof pattern) "symbol")
-    (then (return (Object.assign bindings (object ([ pattern ] value))))))
-  ;; Literal (number or string) — exact equality match
-  (if (|| (=== (typeof pattern) "number") (=== (typeof pattern) "string"))
-    (then
-      (if (=== pattern value)
-        (then (return bindings))
-        (else (return null)))))
-  ;; Array / tuple pattern — structural match element-by-element
-  (if (Array.isArray pattern)
-    (then
-      (if (! (&& (Array.isArray value)
-                  (=== pattern.length value.length)))
-        (then (return null)))
-      (let (result : (union object null)) bindings)
-      (let (i : number) 0)
-      (while (&& result (< i pattern.length))
-        (set! result
-          (match_pattern (index pattern i) (index value i) result))
-        (set! i (+ i 1)))
-      (return result)))
-  ;; No matching rule — fail
-  (return null))
+  (fn try_match_patterns ((msg : any) (patterns : (type-array any))) : boolean
+    ; "Return true if msg matches any pattern in the waiting_patterns array.
+    ; Used in send() to decide whether to wake a blocked task."
+    (let (matched : boolean) false)
+    (let (i : number) 0)
+    (while (&& (! matched) (< i patterns.length))
+      (let (ps : any) (index patterns i))
+      (let (bindings : (union object null))
+        (match_pattern ps.pattern msg (object)))
+      (if bindings (then (set! matched true)))
+      (set! i (+ i 1)))
+    (return matched)
+  )
 
-
-(fn try_match_patterns ((msg : any) (patterns : (Array any))) : boolean
-  "Return true if msg matches any pattern in the waiting_patterns array.
-   Used in send() to decide whether to wake a blocked task."
-  (let (matched : boolean) false)
-  (let (i : number) 0)
-  (while (&& (! matched) (< i patterns.length))
-    (let (ps : any) (index patterns i))
-    (let (bindings : (union object null))
-      (match_pattern ps.pattern msg (object)))
-    (if bindings (then (set! matched true)))
-    (set! i (+ i 1)))
-  (return matched))
-
-
-(fn compute_match_result ((msg : any) (patterns : (Array any))) : (union object null)
-  "Return the first match-result object { matched_pattern_index, message, bindings }
-   for msg against patterns, or null if no pattern matches.
-   Used in send() to pre-compute the resume value for a waking task."
-  (let (result : (union object null)) null)
-  (let (i : number) 0)
-  (while (&& (! result) (< i patterns.length))
-    (let (ps : any) (index patterns i))
-    (let (bindings : (union object null))
-      (match_pattern ps.pattern msg (object)))
-    (if bindings
+  (fn match_pattern ((pattern : any) (value : any) (bindings : object)) : (union object null)
+    ; "Attempt to match pattern against value.
+    ; Returns a (possibly mutated) bindings object on success, or null on failure.
+    ; 'bindings' is passed in so recursive calls accumulate into the same object."
+    ;; Wildcard — always matches, no binding produced
+    (if (=== pattern "_")
+      (then (return bindings)))
+    ;; JS Symbol — variable binding; stores value under the symbol key
+    (if (=== (typeof pattern) "symbol")
+      (then (return (Object.assign bindings (object ([ pattern ] value))))))
+    ;; Literal (number or string) — exact equality match
+    (if (|| (=== (typeof pattern) "number") (=== (typeof pattern) "string"))
       (then
-        (set! result
-          (object
-            (matched_pattern_index i)
-            (message               msg)
-            (bindings              bindings)))))
-    (set! i (+ i 1)))
-  (return result))
+        (if (=== pattern value)
+          (then (return bindings))
+          (else (return null)))))
+    ;; Array / tuple pattern — structural match element-by-element
+    (if (Array.isArray pattern)
+      (then
+        (if (! (&& (Array.isArray value)
+                    (=== pattern.length value.length)))
+          (then (return null)))
+        (let (result : (union object null)) bindings)
+        (let (i : number) 0)
+        (while (&& result (< i pattern.length))
+          (set! result
+            (match_pattern (index pattern i) (index value i) result))
+          (set! i (+ i 1)))
+        (return result)))
+    ;; No matching rule — fail
+    (return null)
+  )
 
+
+  (fn compute_match_result ((msg : any) (patterns : (type-array any))) : (union object null)
+    ; "Return the first match-result object { matched_pattern_index, message, bindings }
+    ; for msg against patterns, or null if no pattern matches.
+    ; Used in send() to pre-compute the resume value for a waking task."
+    (let (result : (union object null)) null)
+    (let (i : number) 0)
+    (while (&& (! result) (< i patterns.length))
+      (let (ps : any) (index patterns i))
+      (let (bindings : (union object null))
+        (match_pattern ps.pattern msg (object)))
+      (if bindings
+        (then
+          (set! result
+            (object
+              (matched_pattern_index i)
+              (message               msg)
+              (bindings              bindings)))))
+      (set! i (+ i 1)))
+    (return result)
+  )
 )
