@@ -34,14 +34,12 @@ class Scheduler {
     return pid;
   }
   schedule(task: any): void {
-    "Enqueue task into its priority run queue.";
     let priority: string = task.priority;
     let queue: any[] = this.run_queues[priority];
     queue.push(task);
     this.total_run_queue_length = (this.total_run_queue_length + 1);
   }
   pick_next_task(): any {
-    "Dequeue the highest-priority runnable task.";
     let found: any = null;
     let i: number = 0;
     while (((!found) && (i < this.priority_order.length))) {
@@ -56,7 +54,6 @@ class Scheduler {
     return found;
   }
   execute_slice(task: any): void {
-    "Run one slice of a task (up to budget reductions).";
     this.current_task = task;
     task.budget = task.initial_budget;
     let resume_val: any = task.pending_resume;
@@ -88,7 +85,6 @@ class Scheduler {
     this.current_task = null;
   }
   handle_primitive(task: any, primitive: any): any {
-    "Dispatch a yielded primitive; return the resume value for the next gen.next().";
     match(primitive, ({
       type: "yield"
     })(undefined), ({
@@ -102,13 +98,11 @@ class Scheduler {
     })(this.handle_effect(task, cap, op, args)), _(this.crash_unknown_primitive(task, primitive)));
   }
   crash_unknown_primitive(task: any, primitive: any): any {
-    "Emit an AGC error code and mark task as crashed; returns undefined.";
     this.emit_agc_code("AGC-S999", ("Unknown primitive: " + JSON.stringify(primitive)));
     task.status = "crashed";
     undefined;
   }
   run(): void {
-    "Synchronous scheduler loop — runs until all tasks complete or block.";
     this.running = true;
     while (this.running) {
       this.tick_count = (this.tick_count + 1);
@@ -154,7 +148,6 @@ class Scheduler {
     }));
   }
   handle_receive(task: any, patterns: any): any {
-    "Handle a 'receive' primitive.  Returns the resume value, or undefined\n       if the task was blocked (in which case task.status = 'waiting').";
     if ((task.mailbox.length > 0)) {
       if (patterns) {
         return this.handle_selective_receive(task, patterns);
@@ -176,7 +169,6 @@ class Scheduler {
     }
   }
   handle_selective_receive(task: any, patterns: any[]): any {
-    "Scan mailbox for first matching pattern within reduction budget.\n       Returns match_result object on success, or undefined if blocked / budget exceeded.";
     task.mailbox_scan_count = (task.mailbox_scan_count + 1);
     let mailbox: any[] = task.mailbox;
     let scan_count: number = 0;
@@ -255,7 +247,6 @@ class Scheduler {
     }
   }
   handle_effect(task: any, capability: any, operation: string, args: any[]): any {
-    "Verify capability and dispatch effect; return result as generator resume value.";
     if ((!task.capabilities.has(capability))) {
       this.emit_agc_code("AGC-CAP500", (("Task " + task.id) + " attempted effect without capability"));
       task.status = "crashed";
@@ -287,7 +278,6 @@ class Scheduler {
     result;
   }
   dispatch_effect(capability: any, operation: string, args: any[]): any {
-    "Route effect to the appropriate handler method.";
     switch (capability.cap_type) {
       case "log":
         this.effect_log(operation, args);
@@ -380,7 +370,6 @@ class Scheduler {
     }
   }
   emit_agc_code(code: string, message: string): void {
-    "Emit a diagnostic event to all channels.";
     let event: AGCEvent = new AGCEvent(code, message, Date.now(), (this.current_task ? this.current_task.id : null), ({
       
     }));
