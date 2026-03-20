@@ -9,6 +9,8 @@
       (field (count       : number) 0)
 
       (constructor ((public size : number))
+        ; theoretically less efficient than pushing
+        ; but allows a more succint implementation.
         (set! this.buffer (new Array size)))
 
       (get length () (return this.count))
@@ -17,7 +19,8 @@
         (this.buffer [this.write_index] = item)
         (set! this.write_index (% (+ this.write_index 1) this.size))
         (if (< this.count this.size)
-          (then (set! this.count (+ this.count 1)))))
+          (then (set! this.count (+ this.count 1))))
+      )
 
       (method to_array () (returns (type-array any))
         "Returns items in chronological (oldest-first) order."
@@ -26,7 +29,8 @@
             (let* ((j (+ (- this.write_index this.count) i))
                    (item (mindex this.buffer j)))
               ((. output push) item)))
-        (return output))
+        (return output)
+      )
     )
   ))
 )
