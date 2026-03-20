@@ -1,26 +1,32 @@
 (program
 ;; Layer 1 — RingBuffer utility
 ;; Fixed-size circular buffer; oldest entry overwritten when full.
+  (import (object (named (array (object (name "mindex"))))) "./helpers")
+  (export (class RingBuffer
+    (class-body
+      (field (buffer      : (type-array any)))
+      (field (write_index : number) 0)
+      (field (count       : number) 0)
 
-(export (class RingBuffer
-  (class-body
-    (field (buffer      : (type-array any)))
-    (field (write_index : number) 0)
-    (field (count       : number) 0)
+      (constructor ((public size : number))
+        (set! this.buffer (new Array size)))
 
-    (constructor ((public size : number))
-      (set! this.buffer (new Array size)))
+      (get length () (return this.count))
 
-    (method push ((item : any)) (returns void)
-      (this.buffer [this.write_index] = item)
-      (set! this.write_index (% (+ this.write_index 1) this.size))
-      (if (< this.count this.size)
-        (then (set! this.count (+ this.count 1)))))
+      (method push ((item : any)) (returns void)
+        (this.buffer [this.write_index] = item)
+        (set! this.write_index (% (+ this.write_index 1) this.size))
+        (if (< this.count this.size)
+          (then (set! this.count (+ this.count 1)))))
 
-    (method to_array () (returns (type-array any))
-      "Returns items in chronological (oldest-first) order."
-      (if (< this.count this.size)
-        (then (return (this.buffer.slice 0 this.count)))
-        (else (return ((. (this.buffer.slice this.write_index) concat)
-          (this.buffer.slice 0 this.write_index))))))))))
+      (method to_array () (returns (type-array any))
+        "Returns items in chronological (oldest-first) order."
+        (let (output : (type-array any)) (array))
+        (for (i 0) (< i this.count) (+ i 1)
+            (let* ((j (+ (- this.write_index this.count) i))
+                   (item (mindex this.buffer j)))
+              ((. output push) item)))
+        (return output))
+    )
+  ))
 )
