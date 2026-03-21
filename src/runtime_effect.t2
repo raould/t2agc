@@ -1,0 +1,14 @@
+(program
+;; Layer 4 — Effect primitive (yield to scheduler).
+;; The scheduler verifies the capability, dispatches the effect, and resumes
+;; the task with the effect's return value.
+;; Depends on: Capability (capability.t2)
+
+(fn effect ((capability : Capability) (operation : string) (rest args : (type-array any))) : any
+  (yield
+    (object
+      (type       "effect")
+      (capability capability)
+      (operation  operation)
+      (args       args))))
+)

@@ -1,0 +1,103 @@
+(program
+;; Layer 4 — Inter-task message delivery.
+;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
+;;             match_pattern.t2, runtime_globals.t2
+
+(fn send ((target_pid : number) (msg : any)) : void
+  ;; Deliver msg to target task's mailbox, applying overflow policy, then
+  ;; wake the target if it is blocked on a matching receive.
+  (let (scheduler : Scheduler)        (get_global_scheduler))
+  (let (sender    : (union Task null)) scheduler.current_task)
+  (let (target    : (union Task null)) (scheduler.tasks.get target_pid))
+
+  (if (! target)
+    (then
+      (scheduler.emit_agc_code "AGC-M050"
+        (+ "Send to non-existent pid: " target_pid))
+      (return undefined)))
+
+  (let (mailbox_length : number) target.mailbox.length)
+
+  (if (>= mailbox_length target.mailbox_max)
+    ;; Mailbox full — apply overflow policy
+    (then
+      (switch target.mailbox_overflow_policy
+        (case "drop-oldest"
+          (target.mailbox.shift)
+          (target.mailbox.push msg)
+          (scheduler.emit_agc_code "AGC-M010"
+            (+ "Mailbox overflow (drop-oldest) for task " target_pid)))
+
+        (case "drop-newest"
+          (scheduler.emit_agc_code "AGC-M010"
+            (+ "Mailbox overflow (drop-newest) for task " target_pid)))
+
+        (case "reject"
+          (if sender
+            (then
+              (sender.mailbox.push
+                (array "mailbox_full" target_pid)))
+            (else null))
+          (scheduler.emit_agc_code "AGC-M010"
+            (+ "Mailbox overflow (reject) for task " target_pid)))
+
+        (case "escalate"
+          (set! (. target status) "crashed")
+          (scheduler.emit_agc_code "AGC-M010"
+            (+ "Mailbox overflow (escalate) - crashing task " target_pid))
+          (target.record_exceptional "mailbox_overflow"
+            (object (sender (ternary sender sender.id null)))))))
+
+    ;; Mailbox has space — append message
+    (else
+      (target.mailbox.push msg)
+
+      (if sender
+        (then
+          (set! (. sender total_messages_sent)
+            (+ sender.total_messages_sent 1))))
+
+      (scheduler.orchestrator_history.push
+        (object
+          (type      "send")
+          (timestamp (Date.now))
+          (from      (ternary sender sender.id null))
+          (to        target_pid)
+          (message   msg)))))
+
+  ;; ── Wake-up logic ─────────────────────────────────────────────────────────
+  ;; If target is blocked on receive and the new message matches, pre-compute
+  ;; the match result and store it as pending_resume so execute_slice can pass
+  ;; it directly to gen.next(), correctly resuming the receive yield.
+
+  (if (== target.status "waiting")
+    (then
+      (if target.waiting_patterns
+        ;; Selective receive — compute match_result against the new message
+        (then
+          (let (wake_result : (union object null))
+            (compute_match_result msg target.waiting_patterns))
+          (if wake_result
+            ;; Consume the message from the mailbox (we just pushed it above)
+            (then
+              (target.mailbox.pop)
+              (set! (. target pending_resume)     wake_result)
+              (set! (. target waiting_patterns)   null)
+              (set! (. target status)             "runnable")
+              (scheduler.waiting_tasks.delete target_pid)
+              (scheduler.schedule target)
+              (target.record_exceptional "woken_by_message"
+                (object (sender (ternary sender sender.id null)))))))
+
+        ;; Simple (non-selective) receive — any message wakes the task
+        (else
+          ;; Move the message from the mailbox directly into pending_resume
+          (target.mailbox.pop)
+          (set! (. target pending_resume)   msg)
+          (set! (. target waiting_patterns) null)
+          (set! (. target status)           "runnable")
+          (scheduler.waiting_tasks.delete target_pid)
+          (scheduler.schedule target)
+          (target.record_exceptional "woken_by_message"
+            (object (sender (ternary sender sender.id null)))))))))
+)

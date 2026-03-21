@@ -14,25 +14,25 @@
         (set! this.id (globalThis.crypto.randomUUID)))
 
       (method can_perform ((operation : string)) (returns boolean)
-        "Return true if this capability allows the given operation."
+        ;; Return true if this capability allows the given operation.
         (return (this.operations.includes operation)))))
 
   ;; ── Predefined capability constructors ──────────────────────────────────────
 
   (fn make_log_capability () : Capability
-    "Full log capability: info, warn, error, debug."
+    ;; Full log capability: info, warn, error, debug.
     (return (new Capability "log" (array "info" "warn" "error" "debug") (object))))
 
   (fn make_io_capability ((allowed_hosts : (type-array string))) : Capability
-    "I/O capability; optionally restricts fetch to specific hostnames."
+    ;; I/O capability; optionally restricts fetch to specific hostnames.
     (return (new Capability "io" (array "read" "write" "fetch")
       (object (allowedHosts allowed_hosts)))))
 
   (fn make_timer_capability () : Capability
-    "Timer capability: sleep, set_timeout, set_interval."
+    ;; Timer capability: sleep, set_timeout, set_interval.
     (return (new Capability "timer" (array "sleep" "set_timeout" "set_interval") (object))))
 
   (fn make_random_capability () : Capability
-    "Random number generation capability."
+    ;; Random number generation capability.
     (return (new Capability "random" (array "next" "next_int" "next_float") (object))))
 )

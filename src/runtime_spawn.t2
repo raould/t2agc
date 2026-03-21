@@ -1,0 +1,25 @@
+(program
+;; Layer 4 — Task spawning.
+;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
+;;             Capability (capability.t2), runtime_globals.t2
+
+(fn spawn
+    ((gen_fn        : Function)
+     (args          : (type-array any))
+     (priority      : Priority)
+     (capabilities  : (type-app Set Capability))) : number
+  ;; Create a Task, register it, and enqueue it for scheduling.
+  (let (scheduler : Scheduler) (get_global_scheduler))
+  (let (pid       : number)    (scheduler.next_pid))
+  (let (task      : Task)      (new Task pid gen_fn args priority capabilities))
+
+  (scheduler.tasks.set pid task)
+  (scheduler.schedule task)
+  (scheduler.orchestrator_history.push
+    (object
+      (type      "spawn")
+      (timestamp (Date.now))
+      (pid       pid)
+      (priority  priority)))
+  pid)
+)

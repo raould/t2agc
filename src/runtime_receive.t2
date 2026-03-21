@@ -1,0 +1,9 @@
+(program
+;; Layer 4 — Receive primitive (yield to scheduler).
+;; The task is resumed with the first incoming message as the yield value.
+;; Used directly in generator-fn bodies; see defmacro receive for the
+;; pattern-matching sugar.
+
+(fn receive () : any
+  (yield (object (type "receive") (patterns null))))
+)

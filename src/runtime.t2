@@ -1,3 +1,4 @@
+(program
 ;; Layer 4 — Runtime primitives and __t2agc__ global.
 ;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
 ;;             Capability (capability.t2), match_pattern.t2
@@ -19,8 +20,8 @@
       (debug
         (object
           (list_tasks
-            (fn () : (Array any)
-              (let (result : (Array any)) (array))
+            (fn () : (type-array any)
+              (let (result : (type-array any)) (array))
               (scheduler.tasks.for_each
                 (lambda ((task : Task) (pid : number))
                   (result.push
@@ -59,45 +60,45 @@
                       (critical    (task.history_critical.to_array))))))))))
 
           (dump_mailbox
-            (fn ((pid : number)) : (union (Array any) null)
+            (fn ((pid : number)) : (union (type-array any) null)
               (let (task : (union Task null)) (scheduler.tasks.get pid))
-              (if task (then (return task.mailbox)) (else (return null)))
+              (if task (then (return task.mailbox)) (else (return null)))))
 
           (list_waiting
-            (fn () : (Array number)
+            (fn () : (type-array number)
               (Array.from (scheduler.waiting_tasks.keys))))
 
           (get_agc_codes
-            (fn ((limit : number)) : (Array AGCEvent)
+            (fn ((limit : number)) : (type-array AGCEvent)
               (scheduler.agc_codes_emitted.slice (- 0 limit))))
 
           (weave_task_history
-            (fn ((pid : number)) : (union (Array any) null)
+            (fn ((pid : number)) : (union (type-array any) null)
               (let (task : (union Task null)) (scheduler.tasks.get pid))
               (if (! task)
                 (then (return null))
                 (else
-                  (let (combined : (Array any))
-                    ((. ((. (task.history_effects.to_array) map) (lambda ((e : any)) (object (source "effect") (event e)))) concat)ncat
+                  (let (combined : (type-array any))
+                    ((. ((. (task.history_effects.to_array) map) (lambda ((e : any)) (object (source "effect") (event e)))) concat)
                       ((. (task.history_exceptional.to_array) map) (lambda ((e : any)) (object (source "exceptional") (event e))))
                       ((. (task.history_critical.to_array) map) (lambda ((e : any)) (object (source "critical") (event e))))))
                   (combined.sort
                     (lambda ((a : any) (b : any))
                       (- a.event.timestamp b.event.timestamp)))
-                  (return combined))))
+                  (return combined)))))
 
           (weave_system_history
-            (fn () : (Array any)
+            (fn () : (type-array any)
               (scheduler.orchestrator_history.to_array))))))))
 
 ;; ── spawn ──────────────────────────────────────────────────────────────────────
 
 (fn spawn
     ((gen_fn        : Function)
-     (args          : (Array any))
+     (args          : (type-array any))
      (priority      : Priority)
-     (capabilities  : (Set Capability))) : number
-  "Create a Task, register it, and enqueue it for scheduling."
+     (capabilities  : (type-app Set Capability))) : number
+  ;; Create a Task, register it, and enqueue it for scheduling.
   (let (scheduler : Scheduler) (get_global_scheduler))
   (let (pid       : number)    (scheduler.next_pid))
   (let (task      : Task)      (new Task pid gen_fn args priority capabilities))
@@ -115,15 +116,15 @@
 ;; ── run ────────────────────────────────────────────────────────────────────────
 
 (fn run () : void
-  "Start the scheduler loop.  Blocks (synchronously) until all tasks finish."
+  ;; Start the scheduler loop.  Blocks (synchronously) until all tasks finish.
   (let (scheduler : Scheduler) (get_global_scheduler))
   (scheduler.run))
 
 ;; ── send ───────────────────────────────────────────────────────────────────────
 
 (fn send ((target_pid : number) (msg : any)) : void
-  "Deliver msg to target task's mailbox, applying overflow policy, then
-   wake the target if it is blocked on a matching receive."
+  ;; Deliver msg to target task's mailbox, applying overflow policy, then
+  ;; wake the target if it is blocked on a matching receive.
   (let (scheduler : Scheduler)        (get_global_scheduler))
   (let (sender    : (union Task null)) scheduler.current_task)
   (let (target    : (union Task null)) (scheduler.tasks.get target_pid))
@@ -221,47 +222,22 @@
 ;; ── receive ────────────────────────────────────────────────────────────────────
 
 (fn receive () : any
-  "Yield a 'receive' primitive to the scheduler (basic blocking version).
-   The task is resumed with the first incoming message as the yield value.
-   Used directly in generator-fn bodies; see defmacro receive for the
-   pattern-matching sugar."
+  ;; Yield a 'receive' primitive to the scheduler (basic blocking version).
+  ;; The task is resumed with the first incoming message as the yield value.
+  ;; Used directly in generator-fn bodies; see defmacro receive for the
+  ;; pattern-matching sugar.
   (yield (object (type "receive") (patterns null))))
 
 ;; ── effect ─────────────────────────────────────────────────────────────────────
 
-(fn effect ((capability : Capability) (operation : string) (rest args : (Array any))) : any
-  "Yield an 'effect' primitive to the scheduler.
-   The scheduler verifies the capability, dispatches the effect, and resumes
-   the task with the effect's return value."
-  (yield
-    (object
-      (type       "effect")
-      (capability capability)
-      (operation  operation)
-      (args       args))))attern-matching sugar."
-  (yield (object (type "receive") (patterns null))))
-
-;; ── effect ─────────────────────────────────────────────────────────────────────
-
-(fn effect ((capability : Capability) (operation : string) (rest args : (Array any))) : any
-  "Yield an 'effect' primitive to the scheduler.
-   The scheduler verifies the capability, dispatches the effect, and resumes
-   the task with the effect's return value."
+(fn effect ((capability : Capability) (operation : string) (rest args : (type-array any))) : any
+  ;; Yield an 'effect' primitive to the scheduler.
+  ;; The scheduler verifies the capability, dispatches the effect, and resumes
+  ;; the task with the effect's return value.
   (yield
     (object
       (type       "effect")
       (capability capability)
       (operation  operation)
       (args       args))))
-;; ── effect ─────────────────────────────────────────────────────────────────────
-
-(fn effect ((capability : Capability) (operation : string) (rest args : (Array any))) : any
-  "Yield an 'effect' primitive to the scheduler.
-   The scheduler verifies the capability, dispatches the effect, and resumes
-   the task with the effect's return value."
-  (yield
-    (object
-      (type       "effect")
-      (capability capability)
-      (operation  operation)
-      (args       args))))
+)
