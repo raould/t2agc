@@ -21,5 +21,8 @@
     "t2lang": "file:../t2lang",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "stage9": "file:../t2lang/stage9"
   }
 }

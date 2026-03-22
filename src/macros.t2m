@@ -36,7 +36,7 @@
            (max_mailbox (or (get_option options "max_mailbox") 1000))
            (on_overflow (or (get_option options "on_overflow") "drop-oldest"))
            (protocol    (get_option options "protocol")))
-      (return (quasi (let (~(symbol (+ (string name) "_fn")))
+      (return (quasi (let ~(symbol (+ (string name) "_fn"))
         (generator-fn ~params
           (begin
             (set! (. (current_generator) __t2_task_options)
@@ -108,7 +108,7 @@
                     (params  info.params)
                     (fn_name (symbol (+ "make_" lower_name "_"
                                         (tag.replaceAll "-" "_")))))
-               (return (quasi (let (~fn_name)
+               (return (quasi (let ~fn_name
                  (lambda (~@(map params (lambda ((p)) (quasi (~p)))))
                    (array ~tag ~@params)))))))))
       (return (quasi (begin
@@ -145,7 +145,7 @@
                   (return (quasi (field (~fsym : ~ftype)))))))
             (field (__opaque_tag : symbol))))
 
-        (let (~ctor_sym)
+        (let ~ctor_sym
           (lambda (~@(map fields (lambda ((spec))
                       (quasi (~(field_sym_of spec))))))
             (let (__inst) (new ~class_sym))
@@ -158,10 +158,10 @@
         ~@(map fields (lambda ((spec))
             (let* ((fsym    (field_sym_of spec))
                    (acc_sym (symbol (+ lower_name "_" (string fsym)))))
-              (return (quasi (let (~acc_sym)
+              (return (quasi (let ~acc_sym
                 (lambda ((__inst)) __inst.~fsym)))))))
 
-        (let (~pred_sym)
+        (let ~pred_sym
           (lambda ((__obj))
             (and (!= __obj null)
                  (== (typeof __obj) "object")
@@ -178,10 +178,5 @@
       ~@body))))
 
 
-  (macro-export receive)
-  (macro-export task)
-  (macro-export spawn_task)
-  (macro-export defprotocol)
-  (macro-export defopaque)
-  (macro-export behavior)
+  (macro-export receive task spawn_task defprotocol defopaque behavior)
 )

@@ -1,6 +1,7 @@
 (program
   ;; Layer 6 — OTP: supervisors, registries, and the behavior macro.
   ;; Depends on: all previous layers.
+  (macro-import m "./macros.t2m")
 
   ;; ── ChildSpec interface ───────────────────────────────────────────────────────
   ;; A ChildSpec describes how a supervisor should start and restart a child.
@@ -41,11 +42,11 @@
   ;; ── Registry task ─────────────────────────────────────────────────────────────
   ;; Simple name → pid registry.  Spawn one instance at startup.
 
-  (task registry ()
+  (m/task registry (_unused)
     (let (names : (type-app Map string number)) (new Map))
 
-    (loop
-      (receive
+    (while true
+      (m/receive
         ((array "register" name pid)
           (names.set name pid))
 
@@ -54,44 +55,14 @@
 
         ((array "whereis" name from)
           (send from (names.get name))))
-      (yield)
-      (recur)))
-
-
-  ;; ── defmacro behavior ─────────────────────────────────────────────────────────
-  ;;
-  ;; A behavior is a task with a declared protocol annotation (for Dlite analysis).
-  ;; The protocol name is stored in __t2_task_options.protocol.
-  ;;
-  ;; Example:
-  ;;   (behavior counter_server Counter (initial_value cap_log)
-  ;;     (let state initial_value)
-  ;;     (loop
-  ;;       (receive
-  ;;         ((array "inc" n)    (set! state (+ state n)))
-  ;;         ((array "get" from) (send from state)))
-  ;;       (yield)
-  ;;       (recur)))
-  ;;
-  ;; Expands to:
-  ;;   (task counter_server (initial_value cap_log)
-  ;;     ("protocol" Counter)
-  ;;     (let state initial_value)
-  ;;     ...)
-
-  (defmacro behavior ((name) (protocol) (params) (rest body))
-    ; "Define a behavior (gen_server-style task) with a protocol annotation.
-    ;  Equivalent to the task macro with a ('protocol' <protocol>) option prepended."
-    (quasi (task ~name ~params
-      ("protocol" ~protocol)
-      ~@body)))
+      (yield)))
 
 
   ;; ── Supervisor behavior ───────────────────────────────────────────────────────
   ;; Standard one-for-one supervisor.  Restart intensity (max_restarts / max_time)
   ;; is tracked but enforcement is left as a TODO.
 
-  (task supervisor (child_specs strategy max_restarts max_time)
+  (m/task supervisor (child_specs strategy max_restarts max_time)
     (let (children       : (type-app Map symbol number))         (new Map))
     (let (restart_counts : (type-app Map symbol (type-array number))) (new Map))
 
@@ -120,32 +91,32 @@
       (let (pid : number) (restart_child spec))
       (children.set spec.id pid)))
 
-    (loop
-      (receive
+    (while true
+      (m/receive
         ;; Child exited
         ((array "exit" child_id reason)
           (let (spec : any) (find_spec child_id))
           (if spec
-            (then (match spec.restart_policy
-              ("permanent"
-                (update_restart_count child_id)
-                (let (new_pid : number) (restart_child spec))
-                (children.set spec.id new_pid))
+            (then
+              (switch spec.restart_policy
+                (case "permanent"
+                  (update_restart_count child_id)
+                  (let (new_pid : number) (restart_child spec))
+                  (children.set spec.id new_pid))
 
-              ("transient"
-                (if (!= reason "normal")
-                  (then
-                    (update_restart_count child_id)
-                    (let (new_pid : number) (restart_child spec))
-                    (children.set spec.id new_pid))))
+                (case "transient"
+                  (if (!= reason "normal")
+                    (then
+                      (update_restart_count child_id)
+                      (let (new_pid : number) (restart_child spec))
+                      (children.set spec.id new_pid))
+                    (else null)))
 
-              ("temporary"
-                null))))
+                (case "temporary" null))))
 
         ;; Introspection
         ((array "which_children" from)
           (send from children)))
 
-      (yield)
-      (recur)))
+      (yield)))
   )
