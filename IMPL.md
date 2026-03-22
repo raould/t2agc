@@ -2,6 +2,35 @@
 
 This document outlines the staged implementation plan for the `t2-agc` runtime, using `t2lang`. The goal is to build a tiny, deterministic, cooperative actor runtime inspired by the Apollo Guidance Computer.
 
+---
+
+## Implementation Status
+
+All 16 source files compile cleanly with `npx t2tc --outDir /tmp/t2test`. Stages 1–7 are implemented. Remaining work is tracked in [Next Steps](#-next-steps).
+
+| Stage | Status | Source file(s) |
+|-------|--------|----------------|
+| Layer 0 — Types | ✅ Done | `src/types.t2` |
+| Layer 1 — RingBuffer | ✅ Done | `src/ring_buffer.t2`, `src/array_util.t2` |
+| Layer 1 — AGCEvent | ✅ Done | `src/agc_event.t2` |
+| Layer 1 — Capability | ✅ Done | `src/capability.t2` |
+| Layer 1 — match_pattern | ✅ Done | `src/match_pattern.t2` |
+| Layer 2 — Task | ✅ Done | `src/task.t2` |
+| Layer 3 — Scheduler | ✅ Done (⚠️ see note) | `src/scheduler.t2` |
+| Layer 4 — Globals | ✅ Done | `src/runtime_globals.t2` |
+| Layer 4 — init_runtime | ✅ Done | `src/runtime_init.t2` |
+| Layer 4 — spawn | ✅ Done | `src/runtime_spawn.t2` |
+| Layer 4 — run | ✅ Done | `src/runtime_run.t2` |
+| Layer 4 — send | ✅ Done | `src/runtime_send.t2` |
+| Layer 4 — receive | ✅ Done | `src/runtime_receive.t2` |
+| Layer 4 — effect | ✅ Done | `src/runtime_effect.t2` |
+| Layer 5 — Macros | ✅ Done | `src/macros.t2m` |
+| Layer 6 — OTP | ✅ Done | `src/otp.t2` |
+
+> ⚠️ **Known bug — `scheduler.t2` `handle_primitive`**: uses `(match primitive ...)` which the t2lang compiler emits as a JS `match()` call that does not exist at runtime. Must be replaced with `(switch (. primitive type) (case "yield" ...) (case "receive" ...) ...)` before the scheduler can execute.
+
+---
+
 ## Implementation Order
 
 - Key non-obvious ordering constraints:
@@ -47,8 +76,9 @@ This document outlines the staged implementation plan for the `t2-agc` runtime, 
 
 ---
 
-## 📅 Stage 1: The Kernel (Scheduler & Tasks)
+## ✅ Stage 1: The Kernel (Scheduler & Tasks)
 **Goal:** Establish the execution loop, task structure, and cooperative yielding.
+**Status:** Complete — `src/task.t2`, `src/ring_buffer.t2`, `src/scheduler.t2`, `src/runtime_spawn.t2`, `src/runtime_run.t2`.
 
 ### 1.1 Data Structures
 
@@ -463,7 +493,8 @@ function spawn(generatorFn, args = [], priority = 'normal', capabilities = new S
 
 ---
 
-## 📅 Stage 2: Messaging (Send & Basic Receive)
+## ✅ Stage 2: Messaging (Send & Basic Receive)
+**Status:** Complete — `src/runtime_send.t2`, `src/runtime_receive.t2`.
 **Goal:** Enable tasks to communicate with mailbox overflow policies and wake-up mechanisms.
 
 ### 2.1 Mailbox Configuration
@@ -747,7 +778,8 @@ The scheduler should periodically check for mailbox pathologies:
 
 ---
 
-## 📅 Stage 3: Selective Receive
+## ✅ Stage 3: Selective Receive
+**Status:** Complete — `src/match_pattern.t2`; selective receive path in `src/scheduler.t2` (`handle_selective_receive`, `compute_match_result` wake-up logic in `src/runtime_send.t2`).
 **Goal:** The heart of the actor model — scanning the mailbox for pattern matches.
 
 ### 3.1 The Challenge
@@ -1108,7 +1140,8 @@ This demonstrates **selective** receive - messages are not strictly FIFO.
 
 ---
 
-## 📅 Stage 4: Capabilities & Effects
+## ✅ Stage 4: Capabilities & Effects
+**Status:** Complete — `src/capability.t2`, `src/runtime_effect.t2`; `handle_effect`/`dispatch_effect` in `src/scheduler.t2`.
 **Goal:** Enforce safety and "authority-based" side effects.
 
 ### 4.1 Capability Structure
@@ -1467,7 +1500,8 @@ This enables:
 
 ---
 
-## 📅 Stage 5: Diagnostics & Determinism (The "AGC" Layer)
+## ✅ Stage 5: Diagnostics & Determinism (The "AGC" Layer)
+**Status:** Complete — `src/agc_event.t2`; AGC code emission, ring-buffer histories, and `__t2agc__` debug object in `src/runtime_init.t2`; `emit_agc_code`/`check_mailbox_health` in `src/scheduler.t2`.
 **Goal:** Observability, debugging, and AGC-coded diagnostics.
 
 ### 5.1 Complete AGC Code Catalog
@@ -1788,7 +1822,8 @@ timeline.forEach(event => {
 });
 ```
 
-## 📅 Stage 6: Macros & Syntactic Sugar
+## ✅ Stage 6: Macros & Syntactic Sugar
+**Status:** Complete — all six macros (`receive`, `task`, `spawn_task`, `defprotocol`, `defopaque`, `behavior`) implemented in `src/macros.t2m` using `=&` clause syntax.
 **Goal:** Make t2-agc code look clean and idiomatic.
 
 ### 6.1 `task` Macro
@@ -2103,7 +2138,8 @@ Simplifies spawning tasks defined with the `task` macro by reading the stored `_
   __pid)
 ```
 
-## 📅 Stage 7: OTP Basics (t2-agc-otp)
+## ✅ Stage 7: OTP Basics (t2-agc-otp)
+**Status:** Complete — `src/otp.t2`; `restart_child`, `registry` task, `supervisor` task (one-for-one, with `handle_exit` lambda); `behavior` macro in `src/macros.t2m`.
 **Goal:** Higher-level reliability patterns.
 
 ### 7.1 Supervisors
@@ -2246,18 +2282,61 @@ All OTP-level constructs emit appropriate AGC codes and integrate with the debug
 - Registry operations recorded
 - Behavior lifecycle events tracked
 
-## 📅 Next Steps Summary
+## 📅 Next Steps
 
-1. **Implement**: Build `src/kernel.t2` with Scheduler and Task classes
-2. **Implement**: Build `src/primitives.t2` with spawn, send, receive, effect
-3. **Test**: Write ping_pong example (from EXAMPLES.md)
-4. **Implement**: Pattern matching in `src/pattern.t2`
-5. **Test**: Selective receive examples
-6. **Implement**: Capabilities in `src/capabilities.t2`
-7. **Implement**: AGC codes and debugging in `src/diagnostics.t2`
-8. **Implement**: Macros in `src/macros.t2`
-9. **Test**: Counter actor, echo server examples
-10. **Implement**: OTP layer in `src/otp.t2`
-11. **Integrate**: Dlite static analyzer (separate tool)
+All 16 source files compile. Remaining work before the package is usable:
 
-**This implementation plan now has sufficient detail to guide actual t2-lang implementation.**
+### 1. Fix `scheduler.t2` `handle_primitive` (blocking — runtime correctness)
+
+`handle_primitive` currently uses `(match primitive ...)` which emits a JS `match()` call that does not exist. Replace with a `switch` on `primitive.type`:
+
+```t2
+(method handle_primitive ((task : any) (primitive : any)) (returns any)
+  (switch (. primitive type)
+    (case "yield"
+      undefined)
+    (case "receive"
+      (this.handle_receive task (. primitive patterns)))
+    (case "effect"
+      (this.handle_effect task (. primitive capability)
+                               (. primitive operation)
+                               (. primitive args)))
+    (default
+      (this.crash_unknown_primitive task primitive))))
+```
+
+### 2. Wire exports and imports across all source files
+
+No file currently has `(export ...)` or `(import ...)` declarations. Each module needs to export its public API and import its dependencies. Rough dependency graph:
+
+- `types.t2` → export all type aliases
+- `array_util.t2` → export `mod`, `mindex`
+- `agc_event.t2` → already has `(export (class AGCEvent ...))`
+- `ring_buffer.t2` → already has `(export (class RingBuffer ...))` + import `array_util`
+- `capability.t2` → export `Capability`, `make_*_capability`; import `types.t2`
+- `match_pattern.t2` → export `match_pattern`, `try_match_patterns`, `compute_match_result`
+- `task.t2` → export `Task`; import types, ring_buffer, capability
+- `scheduler.t2` → export `Scheduler`; import task, agc_event, ring_buffer, match_pattern
+- `runtime_globals.t2` → export `get_global_scheduler`
+- `runtime_init.t2` → export `init_runtime`; import scheduler, task, capability, agc_event
+- `runtime_spawn.t2` → export `spawn`
+- `runtime_run.t2` → export `run`
+- `runtime_send.t2` → export `send`; import scheduler, task, match_pattern, runtime_globals
+- `runtime_receive.t2` → export `receive`
+- `runtime_effect.t2` → export `effect`
+- `otp.t2` → export `restart_child`, `registry_fn`, `supervisor_fn`
+
+### 3. Update `package.json`
+
+Add `main`, `types`, and `exports` fields pointing to the compiled output in `dist/`.
+
+### 4. Write tests
+
+Vitest unit tests covering:
+- `ring_buffer`: push/to_array overflow and wrap-around
+- `match_pattern`: wildcards, literals, arrays, variables, nested
+- `scheduler`: spawn + run, yield round-trips, task completion
+- `send` / `receive`: basic delivery, selective receive, wake-up
+- `effect`: capability check, dispatch, rejection without capability
+- OTP: registry register/unregister/whereis, supervisor restart policies
+- Macros: `task`/`spawn_task`, `defprotocol` constructor generation, `defopaque` predicate and accessors
