@@ -1,0 +1,148 @@
+(program
+  ;; Unit tests for the three pattern-matching utilities:
+  ;;   match_pattern        — single-pattern structural match
+  ;;   try_match_patterns   — boolean scan across a pattern list
+  ;;   compute_match_result — find first match + return result object
+
+  (import (object (named (array (object (name "describe")) (object (name "it"))))) "vitest")
+  (import (object (named (array (object (name "asrt")) (object (name "asrtDeep"))))) "./asrt")
+  (import (object (named (array
+    (object (name "match_pattern"))
+    (object (name "try_match_patterns"))
+    (object (name "compute_match_result"))))) "./match_pattern")
+
+  (describe "match_pattern"
+    (lambda ()
+
+      (it "wildcard _ matches any value and returns bindings"
+        (lambda ()
+          (let (b) (match_pattern "_" 42 (object)))
+          (asrt (!= b null) true)
+          (asrt (!= (match_pattern "_" "hello" (object)) null) true)
+          (asrt (!= (match_pattern "_" null (object)) null) true)))
+
+      (it "string literal matches exactly"
+        (lambda ()
+          (asrt (!= (match_pattern "ok" "ok" (object)) null) true)))
+
+      (it "string literal mismatch returns null"
+        (lambda ()
+          (asrt (match_pattern "ok" "no" (object)) null)
+          (asrt (match_pattern "ok" 42 (object)) null)))
+
+      (it "number literal matches exactly"
+        (lambda ()
+          (asrt (!= (match_pattern 42 42 (object)) null) true)
+          (asrt (match_pattern 42 43 (object)) null)))
+
+      (it "JS Symbol binds value into bindings under that key"
+        (lambda ()
+          (let (sym) (Symbol "x"))
+          (let (b) (match_pattern sym 99 (object)))
+          (asrt (!= b null) true)
+          (asrt (index b sym) 99)))
+
+      (it "array pattern — structural match"
+        (lambda ()
+          (let (b) (match_pattern (array "inc" "_") (array "inc" 5) (object)))
+          (asrt (!= b null) true)))
+
+      (it "array pattern — length mismatch returns null"
+        (lambda ()
+          (asrt (match_pattern (array "a") (array "a" "b") (object)) null)
+          (asrt (match_pattern (array "a" "b") (array "a") (object)) null)))
+
+      (it "nested array pattern matches recursively"
+        (lambda ()
+          (let (b)
+            (match_pattern
+              (array "x" (array "y" "_"))
+              (array "x" (array "y" 9))
+              (object)))
+          (asrt (!= b null) true)
+          ;; Inner literal must match exactly
+          (asrt (match_pattern
+            (array "x" (array "y" 1))
+            (array "x" (array "y" 2))
+            (object)) null)))
+
+      (it "nested array — symbol in inner array binds correctly"
+        (lambda ()
+          (let (sym) (Symbol "n"))
+          (let (b)
+            (match_pattern
+              (array "msg" sym)
+              (array "msg" 7)
+              (object)))
+          (asrt (index b sym) 7)))))
+
+  (describe "try_match_patterns"
+    (lambda ()
+
+      (it "returns true when at least one pattern matches"
+        (lambda ()
+          (let (patterns)
+            (array
+              (object (pattern "ping"))
+              (object (pattern "pong"))))
+          (asrt (try_match_patterns "ping" patterns) true)
+          (asrt (try_match_patterns "pong" patterns) true)))
+
+      (it "returns false when no pattern matches"
+        (lambda ()
+          (let (patterns)
+            (array
+              (object (pattern "ping"))
+              (object (pattern "pong"))))
+          (asrt (try_match_patterns "other" patterns) false)))
+
+      (it "wildcard pattern always returns true"
+        (lambda ()
+          (let (patterns) (array (object (pattern "_"))))
+          (asrt (try_match_patterns 42 patterns) true)
+          (asrt (try_match_patterns "any" patterns) true)))))
+
+  (describe "compute_match_result"
+    (lambda ()
+
+      (it "returns null when no pattern matches"
+        (lambda ()
+          (let (patterns)
+            (array
+              (object (pattern "a"))
+              (object (pattern "b"))))
+          (asrt (compute_match_result "c" patterns) null)))
+
+      (it "returns result with correct matched_pattern_index"
+        (lambda ()
+          (let (patterns)
+            (array
+              (object (pattern (array "add" "_")))
+              (object (pattern (array "sub" "_")))))
+          (let (r) (compute_match_result (array "sub" 3) patterns))
+          (asrt (!= r null) true)
+          (asrt r.matched_pattern_index 1)))
+
+      (it "result includes the original message"
+        (lambda ()
+          (let (patterns) (array (object (pattern "_"))))
+          (let (msg) (array "hello" 42))
+          (let (r) (compute_match_result msg patterns))
+          (asrtDeep r.message (array "hello" 42))))
+
+      (it "first matching pattern wins (index 0 before index 1)"
+        (lambda ()
+          (let (patterns)
+            (array
+              (object (pattern "_"))
+              (object (pattern "x"))))
+          (let (r) (compute_match_result "x" patterns))
+          (asrt r.matched_pattern_index 0)))
+
+      (it "symbol bindings are present in result.bindings"
+        (lambda ()
+          (let (sym) (Symbol "val"))
+          (let (patterns) (array (object (pattern sym))))
+          (let (r) (compute_match_result 77 patterns))
+          (asrt (index r.bindings sym) 77)))))
+)

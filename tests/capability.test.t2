@@ -1,0 +1,156 @@
+(program
+  ;; Unit tests for Capability class and factory functions.
+  ;; Also covers the effect capability-check path via the scheduler.
+
+  (import (object (named (array (object (name "describe")) (object (name "it"))))) "vitest")
+  (import (object (named (array (object (name "asrt")) (object (name "asrtDeep"))))) "./asrt")
+  (import (object (named (array
+    (object (name "Capability"))
+    (object (name "make_log_capability"))
+    (object (name "make_io_capability"))
+    (object (name "make_timer_capability"))
+    (object (name "make_random_capability"))))) "./capability")
+  (import (object (named (array
+    (object (name "init_runtime"))
+    (object (name "run"))
+    (object (name "spawn"))
+    (object (name "get_global_scheduler"))))) "./runtime")
+  (import (object (named (array (object (name "effect"))))) "./runtime_effect")
+
+  (describe "Capability"
+    (lambda ()
+
+      (it "can_perform returns true for an allowed operation"
+        (lambda ()
+          (let (cap) (make_log_capability))
+          (asrt (cap.can_perform "info")  true)
+          (asrt (cap.can_perform "warn")  true)
+          (asrt (cap.can_perform "error") true)
+          (asrt (cap.can_perform "debug") true)))
+
+      (it "can_perform returns false for an unknown operation"
+        (lambda ()
+          (let (cap) (make_log_capability))
+          (asrt (cap.can_perform "write")  false)
+          (asrt (cap.can_perform "fetch")  false)
+          (asrt (cap.can_perform "unknwn") false)))
+
+      (it "make_log_capability has cap_type log"
+        (lambda ()
+          (let (cap2) (make_log_capability))
+          (asrt cap2.cap_type "log")))
+
+      (it "make_io_capability allows read/write/fetch"
+        (lambda ()
+          (let (cap) (make_io_capability (array)))
+          (asrt cap.cap_type "io")
+          (asrt (cap.can_perform "read")  true)
+          (asrt (cap.can_perform "write") true)
+          (asrt (cap.can_perform "fetch") true)
+          (asrt (cap.can_perform "info")  false)))
+
+      (it "make_timer_capability allows sleep/set_timeout/set_interval"
+        (lambda ()
+          (let (cap) (make_timer_capability))
+          (asrt cap.cap_type "timer")
+          (asrt (cap.can_perform "sleep")        true)
+          (asrt (cap.can_perform "set_timeout")  true)
+          (asrt (cap.can_perform "set_interval") true)
+          (asrt (cap.can_perform "info")         false)))
+
+      (it "make_random_capability allows next/next_int/next_float"
+        (lambda ()
+          (let (cap) (make_random_capability))
+          (asrt cap.cap_type "random")
+          (asrt (cap.can_perform "next")       true)
+          (asrt (cap.can_perform "next_int")   true)
+          (asrt (cap.can_perform "next_float") true)
+          (asrt (cap.can_perform "info")       false)))
+
+      (it "each new Capability instance gets a unique id"
+        (lambda ()
+          (let (a) (make_log_capability))
+          (let (b) (make_log_capability))
+          (asrt (!= a.id b.id) true)))
+
+      (it "two capabilities of the same type are distinct objects"
+        (lambda ()
+          (let (a) (make_timer_capability))
+          (let (b) (make_timer_capability))
+          (asrt (!= a b) true)
+          (asrt (!= a.id b.id) true)))))
+
+  (describe "effect — capability check"
+    (lambda ()
+
+      (it "crashes task with AGC-CAP500 when capability not in task.capabilities"
+        (lambda ()
+          (init_runtime)
+          (let (log_cap) (make_log_capability))
+
+          ;; Spawn task with an EMPTY capabilities set — it does not hold log_cap
+          (let (pid)
+            (spawn
+              (generator-fn ()
+                (yield (effect log_cap "info" "should fail")))
+              (array)
+              "normal"
+              (new Set)))
+
+          (run)
+
+          (let (sched)   (get_global_scheduler))
+          (let (task)    (sched.tasks.get pid))
+          (let (codes)   (. sched agc_codes_emitted))
+
+          (asrt task.status "crashed")
+          (asrt (> codes.length 0) true)
+          (let (first_code) (index codes 0))
+          (asrt first_code.code "AGC-CAP500")))
+
+      (it "crashes task with AGC-CAP510 when operation not in capability"
+        (lambda ()
+          (init_runtime)
+          (let (log_cap) (make_log_capability))
+
+          ;; Task holds the capability but requests an unsupported operation
+          (let (cap_set) (new Set (array log_cap)))
+          (let (pid)
+            (spawn
+              (generator-fn ()
+                (yield (effect log_cap "write" "bad op")))
+              (array)
+              "normal"
+              cap_set))
+
+          (run)
+
+          (let (sched) (get_global_scheduler))
+          (let (task)  (sched.tasks.get pid))
+          (let (codes) (. sched agc_codes_emitted))
+
+          (asrt task.status "crashed")
+          (asrt (> codes.length 0) true)
+          (let (first_code) (index codes 0))
+          (asrt first_code.code "AGC-CAP510")))
+
+      (it "dispatches log effect without crashing when capability is held"
+        (lambda ()
+          (init_runtime)
+          (let (log_cap) (make_log_capability))
+          (let (cap_set) (new Set (array log_cap)))
+
+          (let (pid)
+            (spawn
+              (generator-fn ()
+                (yield (effect log_cap "info" "hello from task")))
+              (array)
+              "normal"
+              cap_set))
+
+          (run)
+
+          (let (sched2) (get_global_scheduler))
+          (let (task)   (sched2.tasks.get pid))
+          (asrt task.status "done")))))
+)
