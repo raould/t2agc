@@ -1,0 +1,14 @@
+(program
+  ;; defmacro behavior ────────────────────────────────────────────────────────────
+  ;;
+  ;; A behavior is a task with a declared protocol annotation (for Dlite
+  ;; analysis).  The quasi output contains a bare `task` form which is
+  ;; re-expanded by the caller's macro environment via the macros.t2m barrel.
+
+  (defmacro behavior ((name) (protocol) (params) (rest body))
+    (return (quasi (task ~name ~params
+      ("protocol" ~protocol)
+      ~@body))))
+
+  (macro-export behavior)
+)

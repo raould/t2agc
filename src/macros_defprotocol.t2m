@@ -1,0 +1,53 @@
+(program
+  ;; defmacro defprotocol ────────────────────────────────────────────────────────
+  ;;
+  ;; Registers a message protocol in __t2agc__.protocols and generates
+  ;; per-message constructor functions.
+
+  (defmacro defprotocol ((name) (rest message_specs))
+    (let* ((proto_name (string name))
+           (lower_name (string_lower proto_name))
+           (parse_spec (lambda ((spec))
+             (let* ((tag    (nth spec 1))
+                    (raw    (drop 2 spec))
+                    (params (filter raw (lambda ((p))
+                               (not (and (Array.isArray p)
+                                         (== (length p) 2)
+                                         (== (typeof (head p)) "string"))))))
+                    (opts   (filter raw (lambda ((p))
+                               (and (Array.isArray p)
+                                    (== (length p) 2)
+                                    (== (typeof (head p)) "string"))))))
+               (return (object (tag tag) (params params) (opts opts))))))
+           (parsed      (map message_specs parse_spec))
+           (make_msg_obj (lambda ((info))
+             (let* ((tag    info.tag)
+                    (params info.params)
+                    (reply  (get_option info.opts "reply_shape")))
+               (if reply
+                 (then (return (quasi (object
+                   (tag         ~tag)
+                   (arity       ~(length params))
+                   (params      (array ~@(map params string)))
+                   (reply_shape ~reply)))))
+                 (else (return (quasi (object
+                   (tag    ~tag)
+                   (arity  ~(length params))
+                   (params (array ~@(map params string)))))))))))
+           (make_ctor   (lambda ((info))
+             (let* ((tag     info.tag)
+                    (params  info.params)
+                    (fn_name (symbol (+ "make_" lower_name "_"
+                                        (tag.replaceAll "-" "_")))))
+               (return (quasi (let ~fn_name
+                 (lambda (~@(map params (lambda ((p)) (quasi (~p)))))
+                   (array ~tag ~@params)))))))))
+      (return (quasi (begin
+        (__t2agc__.protocols.set ~proto_name
+          (object
+            (name     ~proto_name)
+            (messages (array ~@(map parsed make_msg_obj)))))
+        ~@(map parsed make_ctor))))))
+
+  (macro-export defprotocol)
+)

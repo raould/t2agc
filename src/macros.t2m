@@ -1,182 +1,22 @@
 (program
-  ;; ── defmacro receive ──────────────────────────────────────────────────────────
-  ;;
-  ;; Selective receive sugar.  Each clause is (pattern body...).
-  ;; Expands to: yield a 'receive' primitive with the pattern array, then
-  ;; switch on matched_pattern_index to run the matching body.
+  ;; Macro barrel — imports and re-exports all t2-agc macros.
+  ;; Consumers: (macro-import m "./macros.t2m")
+  ;; Then use: m/receive, m/task, m/spawn_task, m/defprotocol, m/defopaque, m/behavior
 
-  (defmacro receive ((rest clauses))
-    (let* ((patterns (map clauses (lambda ((clause))
-                       (quasi (object (pattern ~(head clause))))))))
-      (return (quasi (begin
-        (let (__receive_result)
-          (yield
-            (object
-              (type     "receive")
-              (patterns (array ~@patterns)))))
-        (switch __receive_result.matched_pattern_index
-          ~@(map_indexed clauses (lambda ((i) (clause))
-              (quasi (case ~i ~@(tail clause)))))))))))
+  (macro-import _receive     "./macros_receive.t2m")
+  (macro-import _task        "./macros_task.t2m")
+  (macro-import _spawn_task  "./macros_spawn_task.t2m")
+  (macro-import _defprotocol "./macros_defprotocol.t2m")
+  (macro-import _defopaque   "./macros_defopaque.t2m")
+  (macro-import _behavior    "./macros_behavior.t2m")
 
-
-  ;; ── defmacro task ─────────────────────────────────────────────────────────────
-  ;;
-  ;; Defines a named task generator function with options metadata.
-  ;; Leading 2-element string-keyed tuples in the body are treated as options.
-
-  (defmacro task ((name) (params) (rest options_and_body))
-    (let* ((options (take_while
-                      (lambda ((form))
-                        (and (Array.isArray form)
-                             (== (length form) 2)
-                             (== (typeof (head form)) "string")))
-                      options_and_body))
-           (body        (drop (length options) options_and_body))
-           (priority    (or (get_option options "priority")    "normal"))
-           (max_mailbox (or (get_option options "max_mailbox") 1000))
-           (on_overflow (or (get_option options "on_overflow") "drop-oldest"))
-           (protocol    (get_option options "protocol")))
-      (return (quasi (let ~(symbol (+ (string name) "_fn"))
-        (generator-fn ~params
-          (begin
-            (set! (. (current_generator) __t2_task_options)
-              (object
-                (priority    ~priority)
-                (max_mailbox ~max_mailbox)
-                (on_overflow ~on_overflow)
-                (protocol    ~protocol)))
-            ~@body)))))))
-
-
-  ;; ── defmacro spawn_task ───────────────────────────────────────────────────────
-  ;;
-  ;; Spawns a task defined with the task macro, reading its stored options.
-
-  (defmacro spawn_task ((task_name) (args))
-    (let* ((fn_sym (symbol (+ (string task_name) "_fn"))))
-      (return (quasi (begin
-        (let (__task_opts) ~fn_sym.__t2_task_options)
-        (let (__pid)
-          (spawn ~fn_sym ~args
-            __task_opts.priority
-            (new Set)))
-        (let (__task_inst)
-          ((. (get_global_scheduler) tasks.get) __pid))
-        (__task_inst.configure_mailbox
-          __task_opts.max_mailbox
-          __task_opts.on_overflow)
-        __pid)))))
-
-
-  ;; ── defmacro defprotocol ─────────────────────────────────────────────────────
-  ;;
-  ;; Registers a message protocol in __t2agc__.protocols and generates
-  ;; per-message constructor functions.
-
-  (defmacro defprotocol ((name) (rest message_specs))
-    (let* ((proto_name (string name))
-           (lower_name (string_lower proto_name))
-           (parse_spec (lambda ((spec))
-             (let* ((tag    (nth spec 1))
-                    (raw    (drop 2 spec))
-                    (params (filter raw (lambda ((p))
-                               (not (and (Array.isArray p)
-                                         (== (length p) 2)
-                                         (== (typeof (head p)) "string"))))))
-                    (opts   (filter raw (lambda ((p))
-                               (and (Array.isArray p)
-                                    (== (length p) 2)
-                                    (== (typeof (head p)) "string"))))))
-               (return (object (tag tag) (params params) (opts opts))))))
-           (parsed      (map message_specs parse_spec))
-           (make_msg_obj (lambda ((info))
-             (let* ((tag    info.tag)
-                    (params info.params)
-                    (reply  (get_option info.opts "reply_shape")))
-               (if reply
-                 (then (return (quasi (object
-                   (tag         ~tag)
-                   (arity       ~(length params))
-                   (params      (array ~@(map params string)))
-                   (reply_shape ~reply)))))
-                 (else (return (quasi (object
-                   (tag    ~tag)
-                   (arity  ~(length params))
-                   (params (array ~@(map params string)))))))))))
-           (make_ctor   (lambda ((info))
-             (let* ((tag     info.tag)
-                    (params  info.params)
-                    (fn_name (symbol (+ "make_" lower_name "_"
-                                        (tag.replaceAll "-" "_")))))
-               (return (quasi (let ~fn_name
-                 (lambda (~@(map params (lambda ((p)) (quasi (~p)))))
-                   (array ~tag ~@params)))))))))
-      (return (quasi (begin
-        (__t2agc__.protocols.set ~proto_name
-          (object
-            (name     ~proto_name)
-            (messages (array ~@(map parsed make_msg_obj)))))
-        ~@(map parsed make_ctor))))))
-
-
-  ;; ── defmacro defopaque ────────────────────────────────────────────────────────
-  ;;
-  ;; Defines an opaque type with encapsulated fields, a smart constructor,
-  ;; per-field accessors, and a predicate.
-
-  (defmacro defopaque ((name) (rest fields))
-    (let* ((name_str    (string name))
-           (lower_name  (string_lower name_str))
-           (class_sym   (symbol (+ "__" name_str)))
-           (ctor_sym    (symbol (+ "make_" lower_name)))
-           (pred_sym    (symbol (+ lower_name "?")))
-           (field_sym_of  (lambda ((spec))
-             (if (Array.isArray spec) (then (return (head spec))) (else (return spec)))))
-           (field_type_of (lambda ((spec))
-             (if (and (Array.isArray spec) (> (length spec) 1))
-               (then (return (nth spec 2)))
-               (else (return "any"))))))
-      (return (quasi (begin
-        (class ~class_sym
-          (class-body
-            ~@(map fields (lambda ((spec))
-                (let* ((fsym  (field_sym_of spec))
-                       (ftype (field_type_of spec)))
-                  (return (quasi (field (~fsym : ~ftype)))))))
-            (field (__opaque_tag : symbol))))
-
-        (let ~ctor_sym
-          (lambda (~@(map fields (lambda ((spec))
-                      (quasi (~(field_sym_of spec))))))
-            (let (__inst) (new ~class_sym))
-            ~@(map fields (lambda ((spec))
-                (let* ((fsym (field_sym_of spec)))
-                  (return (quasi (set! (. __inst ~fsym) ~fsym))))))
-            (set! (. __inst __opaque_tag) (symbol ~name_str))
-            __inst))
-
-        ~@(map fields (lambda ((spec))
-            (let* ((fsym    (field_sym_of spec))
-                   (acc_sym (symbol (+ lower_name "_" (string fsym)))))
-              (return (quasi (let ~acc_sym
-                (lambda ((__inst)) __inst.~fsym)))))))
-
-        (let ~pred_sym
-          (lambda ((__obj))
-            (and (!= __obj null)
-                 (== (typeof __obj) "object")
-                 (== __obj.__opaque_tag (symbol ~name_str))))))))))
-
-
-  ;; ── defmacro behavior ─────────────────────────────────────────────────────────
-  ;;
-  ;; A behavior is a task with a declared protocol annotation (for Dlite analysis).
-
-  (defmacro behavior ((name) (protocol) (params) (rest body))
-    (return (quasi (task ~name ~params
-      ("protocol" ~protocol)
-      ~@body))))
-
+  (macro-reexport _receive     receive)
+  (macro-reexport _task        task)
+  (macro-reexport _spawn_task  spawn_task)
+  (macro-reexport _defprotocol defprotocol)
+  (macro-reexport _defopaque   defopaque)
+  (macro-reexport _behavior    behavior)
 
   (macro-export receive task spawn_task defprotocol defopaque behavior)
 )
+

@@ -1,0 +1,51 @@
+(program
+  ;; defmacro defopaque ──────────────────────────────────────────────────────────
+  ;;
+  ;; Defines an opaque type with encapsulated fields, a smart constructor,
+  ;; per-field accessors, and a predicate.
+
+  (defmacro defopaque ((name) (rest fields))
+    (let* ((name_str    (string name))
+           (lower_name  (string_lower name_str))
+           (class_sym   (symbol (+ "__" name_str)))
+           (ctor_sym    (symbol (+ "make_" lower_name)))
+           (pred_sym    (symbol (+ lower_name "?")))
+           (field_sym_of  (lambda ((spec))
+             (if (Array.isArray spec) (then (return (head spec))) (else (return spec)))))
+           (field_type_of (lambda ((spec))
+             (if (and (Array.isArray spec) (> (length spec) 1))
+               (then (return (nth spec 2)))
+               (else (return "any"))))))
+      (return (quasi (begin
+        (class ~class_sym
+          (class-body
+            ~@(map fields (lambda ((spec))
+                (let* ((fsym  (field_sym_of spec))
+                       (ftype (field_type_of spec)))
+                  (return (quasi (field (~fsym : ~ftype)))))))
+            (field (__opaque_tag : symbol))))
+
+        (let ~ctor_sym
+          (lambda (~@(map fields (lambda ((spec))
+                      (quasi (~(field_sym_of spec))))))
+            (let (__inst) (new ~class_sym))
+            ~@(map fields (lambda ((spec))
+                (let* ((fsym (field_sym_of spec)))
+                  (return (quasi (set! (. __inst ~fsym) ~fsym))))))
+            (set! (. __inst __opaque_tag) (symbol ~name_str))
+            __inst))
+
+        ~@(map fields (lambda ((spec))
+            (let* ((fsym    (field_sym_of spec))
+                   (acc_sym (symbol (+ lower_name "_" (string fsym)))))
+              (return (quasi (let ~acc_sym
+                (lambda ((__inst)) __inst.~fsym)))))))
+
+        (let ~pred_sym
+          (lambda ((__obj))
+            (and (!= __obj null)
+                 (== (typeof __obj) "object")
+                 (== __obj.__opaque_tag (symbol ~name_str))))))))))
+
+  (macro-export defopaque)
+)

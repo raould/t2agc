@@ -1,0 +1,22 @@
+(program
+  ;; defmacro spawn_task ──────────────────────────────────────────────────────────
+  ;;
+  ;; Spawns a task defined with the task macro, reading its stored options.
+
+  (defmacro spawn_task ((task_name) (args))
+    (let* ((fn_sym (symbol (+ (string task_name) "_fn"))))
+      (return (quasi (begin
+        (let (__task_opts) ~fn_sym.__t2_task_options)
+        (let (__pid)
+          (spawn ~fn_sym ~args
+            __task_opts.priority
+            (new Set)))
+        (let (__task_inst)
+          ((. (get_global_scheduler) tasks.get) __pid))
+        (__task_inst.configure_mailbox
+          __task_opts.max_mailbox
+          __task_opts.on_overflow)
+        __pid)))))
+
+  (macro-export spawn_task)
+)

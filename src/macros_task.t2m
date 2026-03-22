@@ -1,0 +1,31 @@
+(program
+  ;; defmacro task ────────────────────────────────────────────────────────────────
+  ;;
+  ;; Defines a named task generator function with options metadata.
+  ;; Leading 2-element string-keyed tuples in the body are treated as options.
+
+  (defmacro task ((name) (params) (rest options_and_body))
+    (let* ((options (take_while
+                      (lambda ((form))
+                        (and (Array.isArray form)
+                             (== (length form) 2)
+                             (== (typeof (head form)) "string")))
+                      options_and_body))
+           (body        (drop (length options) options_and_body))
+           (priority    (or (get_option options "priority")    "normal"))
+           (max_mailbox (or (get_option options "max_mailbox") 1000))
+           (on_overflow (or (get_option options "on_overflow") "drop-oldest"))
+           (protocol    (get_option options "protocol")))
+      (return (quasi (let ~(symbol (+ (string name) "_fn"))
+        (generator-fn ~params
+          (begin
+            (set! (. (current_generator) __t2_task_options)
+              (object
+                (priority    ~priority)
+                (max_mailbox ~max_mailbox)
+                (on_overflow ~on_overflow)
+                (protocol    ~protocol)))
+            ~@body)))))))
+
+  (macro-export task)
+)
