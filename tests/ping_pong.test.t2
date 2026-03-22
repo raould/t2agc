@@ -1,0 +1,73 @@
+(program
+  (import { describe it } "vitest")
+  (import { asrt asrtDeep } "./asrt")
+  (import { init_runtime run spawn send self get_global_scheduler } "./runtime")
+
+  (describe "Ping-Pong integration tests" (lambda ()
+
+    (it "1. Ping-Pong matches expected termination state" (lambda ()
+      (init_runtime)
+      (let (box) (object (ping_done false) (pong_done false)))
+      
+      (let (ping_fn) (generator-fn ()
+        (let (running) true)
+        (while running
+          (let (msg) (yield (object (type "receive") (patterns null))))
+          (if (=== (index msg 0) "start")
+            (then
+              (send (index msg 2) (array "ping" (index msg 1) (self)))
+            )
+            (else
+              (if (=== (index msg 0) "pong")
+                (then
+                  (let (n) (index msg 1))
+                  (if (> n 0)
+                    (then
+                      (send (index msg 2) (array "ping" (- n 1) (self)))
+                    )
+                    (else
+                      (send (index msg 2) (array "ping" 0 (self)))
+                      (set! (. box ping_done) true)
+                      (set! running false)
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      ))
+
+      (let (pong_fn) (generator-fn ()
+        (let (running) true)
+        (while running
+          (let (msg) (yield (object (type "receive") (patterns null))))
+          (if (=== (index msg 0) "ping")
+            (then
+              (let (n) (index msg 1))
+              (if (> n 0)
+                 (then
+                   (send (index msg 2) (array "pong" (- n 1) (self)))
+                 )
+                 (else
+                   (set! (. box pong_done) true)
+                   (set! running false)
+                 )
+              )
+            )
+          )
+        )
+      ))
+
+      (let (ping_pid) (spawn ping_fn (array) "normal" (new Set)))
+      (let (pong_pid) (spawn pong_fn (array) "normal" (new Set)))
+      
+      (send ping_pid (array "start" 3 pong_pid))
+      (run)
+      
+      (asrt (. box ping_done) true)
+      (asrt (. box pong_done) true)
+    ))
+
+  ))
+)

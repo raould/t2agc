@@ -1,0 +1,57 @@
+(program
+  (import { describe it } "vitest")
+  (import { asrt asrtDeep } "./asrt")
+  (import { init_runtime run spawn send self get_global_scheduler } "./runtime")
+
+  (describe "Echo Server integration tests" (lambda ()
+
+    (it "2. Echo Server handles multiple clients" (lambda ()
+      (init_runtime)
+      (let (box) (object (server_handled 0) (client1_done false) (client2_done false)))
+      
+      (let (echo_server) (generator-fn ()
+        (let (running) true)
+        (while running
+          (let (msg) (yield (object (type "receive") (patterns null))))
+          (console.log "Server received: " msg)
+          (if (=== (index msg 0) "echo")
+            (then
+              (let (from) (index msg 1))
+              (let (payload) (index msg 2))
+              (send from (array "reply" payload))
+              (set! (. box server_handled) (+ (. box server_handled) 1))
+            )
+            (else
+              (if (=== (index msg 0) "stop")
+                (then (set! running false))
+              )
+            )
+          )
+        )
+      ))
+
+      (let (client_fn) (generator-fn ((server_pid) (my_id))
+        (send server_pid (array "echo" (self) (+ "hello from " my_id)))
+        (let (reply) (yield (object (type "receive") (patterns null))))
+        (console.log "Client received: " reply " (expected: " (+ "hello from " my_id) ")")
+        (if (=== (index reply 1) (+ "hello from " my_id))
+          (then
+            (if (=== my_id "c1") (then (set! (. box client1_done) true)))
+            (if (=== my_id "c2") (then (set! (. box client2_done) true)))
+          )
+        )
+      ))
+
+      (let (server_pid) (spawn echo_server (array) "normal" (new Set)))
+      (spawn client_fn (array server_pid "c1") "normal" (new Set))
+      (spawn client_fn (array server_pid "c2") "normal" (new Set))
+      
+      (run)
+      
+      (asrt (. box client1_done) true)
+      (asrt (. box client2_done) true)
+      (asrt (. box server_handled) 2)
+    ))
+
+  ))
+)

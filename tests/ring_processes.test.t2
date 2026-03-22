@@ -1,0 +1,49 @@
+(program
+  (import { describe it } "vitest")
+  (import { asrt asrtDeep } "./asrt")
+  (import { init_runtime run spawn send self get_global_scheduler } "./runtime")
+
+  (describe "Ring of Processes integration tests" (lambda ()
+
+    (it "4. Ring of Processes forwards a token" (lambda ()
+      (init_runtime)
+      (let (box) (object (final_received false) (nodes_passed 0)))
+
+      (let (node_fn) (generator-fn ((my_id) (next_pid))
+        (let (msg) (yield (object (type "receive") (patterns null))))
+        (if (=== (index msg 0) "token")
+          (then
+            (let (hops) (index msg 1))
+            (if next_pid
+              (then
+                (send next_pid (array "token" (+ hops 1)))
+              )
+              (else
+                (set! (. box final_received) true)
+                (set! (. box nodes_passed) hops)
+              )
+            )
+          )
+        )
+      ))
+
+      (let (N) 100)
+      (let (i) 0)
+      (let (prev_pid) undefined)
+
+      (while (< i N)
+        (set! prev_pid (spawn node_fn (array (- N i) prev_pid) "normal" (new Set)))
+        (set! i (+ i 1))
+      )
+
+      ;; the last spawned pid is the first node to receive the token
+      (send prev_pid (array "token" 1))
+
+      (run)
+      
+      (asrt (. box final_received) true)
+      (asrt (. box nodes_passed) 100)
+    ))
+
+  ))
+)

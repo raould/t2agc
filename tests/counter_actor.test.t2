@@ -1,0 +1,57 @@
+(program
+  (import { describe it } "vitest")
+  (import { asrt asrtDeep } "./asrt")
+  (import { init_runtime run spawn send self get_global_scheduler } "./runtime")
+
+  (describe "Counter Actor integration tests" (lambda ()
+
+    (it "3. Counter Actor maintains internal state" (lambda ()
+      (init_runtime)
+      (let (box) (object (final_count 0) (client_done false)))
+
+      (let (counter_server) (generator-fn ()
+        (let (state) 0)
+        (let (running) true)
+        (while running
+          (let (msg) (yield (object (type "receive") (patterns null))))
+          (if (=== (index msg 0) "inc")
+            (then
+              (set! state (+ state (index msg 1)))
+            )
+            (else
+              (if (=== (index msg 0) "get")
+                (then
+                  (send (index msg 1) (array "reply" state))
+                )
+                (else
+                  (if (=== (index msg 0) "stop")
+                    (then (set! running false))
+                  )
+                )
+              )
+            )
+          )
+        )
+      ))
+
+      (let (client_fn) (generator-fn ((server_pid))
+        (send server_pid (array "inc" 5))
+        (send server_pid (array "inc" 10))
+        (send server_pid (array "get" (self)))
+        
+        (let (reply) (yield (object (type "receive") (patterns null))))
+        (set! (. box final_count) (index reply 1))
+        (set! (. box client_done) true)
+      ))
+
+      (let (server_pid) (spawn counter_server (array) "normal" (new Set)))
+      (spawn client_fn (array server_pid) "normal" (new Set))
+      
+      (run)
+      
+      (asrt (. box client_done) true)
+      (asrt (. box final_count) 15)
+    ))
+
+  ))
+)
