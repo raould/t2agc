@@ -24,6 +24,7 @@ All 16 source files compile cleanly with `npx t2tc --outDir /tmp/t2test`. Stages
 | Layer 4 — send | ✅ Done | `src/runtime_send.t2` |
 | Layer 4 — receive | ✅ Done | `src/runtime_receive.t2` |
 | Layer 4 — effect | ✅ Done | `src/runtime_effect.t2` |
+| Layer 4 — runtime barrel | ✅ Done | `src/runtime.t2` |
 | Layer 5 — Macros | ✅ Done | `src/macros.t2m` |
 | Layer 6 — OTP | ✅ Done | `src/otp.t2` |
 
@@ -2286,38 +2287,239 @@ All OTP-level constructs emit appropriate AGC codes and integrate with the debug
 
 All 16 source files compile. Remaining work before the package is usable:
 
+---
+
 ### 1. Wire exports and imports across all source files
 
-No file currently has `(export ...)` or `(import ...)` declarations. Each module needs to export its public API and import its dependencies. Rough dependency graph:
+The t2lang import/export syntax used throughout this codebase:
 
-- `types.t2` → export all type aliases
-- `array_util.t2` → export `mod`, `mindex`
-- `agc_event.t2` → already has `(export (class AGCEvent ...))`
-- `ring_buffer.t2` → already has `(export (class RingBuffer ...))` + import `array_util`
-- `capability.t2` → export `Capability`, `make_*_capability`; import `types.t2`
-- `match_pattern.t2` → export `match_pattern`, `try_match_patterns`, `compute_match_result`
-- `task.t2` → export `Task`; import types, ring_buffer, capability
-- `scheduler.t2` → export `Scheduler`; import task, agc_event, ring_buffer, match_pattern
-- `runtime_globals.t2` → export `get_global_scheduler`
-- `runtime_init.t2` → export `init_runtime`; import scheduler, task, capability, agc_event
-- `runtime_spawn.t2` → export `spawn`
-- `runtime_run.t2` → export `run`
-- `runtime_send.t2` → export `send`; import scheduler, task, match_pattern, runtime_globals
-- `runtime_receive.t2` → export `receive`
-- `runtime_effect.t2` → export `effect`
-- `otp.t2` → export `restart_child`, `registry_fn`, `supervisor_fn`
+```t2
+;; Named export — wraps the definition
+(export (fn foo ...))
+(export (class Foo ...))
+(export (type Bar ...))
+
+;; Named import — destructured from a module path
+(import (object (named (array (object (name "Foo")) (object (name "bar"))))) "./module")
+```
+
+#### Already complete ✅
+
+| File | Exports | Imports |
+|------|---------|---------|
+| `types.t2` | All 6 type aliases | — |
+| `array_util.t2` | `mod`, `mindex` | — |
+| `agc_event.t2` | `AGCEvent` class | — |
+| `ring_buffer.t2` | `RingBuffer` class | `mindex` from `./array_util` |
+
+#### Needs wiring
+
+**`capability.t2`**
+- Wrap `class Capability` and all four `make_*_capability` functions in `(export ...)`
+- No runtime imports needed (CapabilityType is a type alias, not a value)
+
+**`match_pattern.t2`**
+- Wrap `try_match_patterns`, `match_pattern`, `compute_match_result` in `(export ...)`
+
+**`task.t2`**
+- Import `RingBuffer` from `./ring_buffer` and `Capability` from `./capability`
+- Wrap `class Task` in `(export ...)`
+
+**`scheduler.t2`**
+- Import `AGCEvent` from `./agc_event`, `RingBuffer` from `./ring_buffer`,
+  `match_pattern` + `compute_match_result` from `./match_pattern`
+- Wrap `class Scheduler` in `(export ...)`
+
+**`runtime_globals.t2`**
+- Import `Scheduler` from `./scheduler`
+- Wrap `get_global_scheduler` in `(export ...)`
+
+**`runtime_init.t2`**
+- Import `Scheduler` from `./scheduler`, `AGCEvent` from `./agc_event`
+- Wrap `init_runtime` in `(export ...)`
+
+**`runtime_spawn.t2`**
+- Import `Scheduler` from `./scheduler`, `Task` from `./task`,
+  `Capability` from `./capability`, `get_global_scheduler` from `./runtime_globals`
+- Wrap `spawn` in `(export ...)`
+
+**`runtime_run.t2`**
+- Import `get_global_scheduler` from `./runtime_globals`
+- Wrap `run` in `(export ...)`
+
+**`runtime_send.t2`**
+- Import `Task` from `./task`, `compute_match_result` from `./match_pattern`,
+  `get_global_scheduler` from `./runtime_globals`
+- Wrap `send` in `(export ...)`
+
+**`runtime_receive.t2`**
+- Wrap `receive` in `(export ...)`
+
+**`runtime_effect.t2`**
+- Wrap `effect` in `(export ...)`
+
+**`otp.t2`**
+- Already has `(macro-import m "./macros.t2m")`
+- Import `get_global_scheduler` from `./runtime_globals`, `spawn` from `./runtime_spawn`,
+  `send` from `./runtime_send`, `Capability` from `./capability`
+- Wrap `restart_child`, `registry_fn`, `supervisor_fn` in `(export ...)`
+
+#### Library entry point
+
+Create `src/index.t2` that re-exports the entire public API:
+
+```t2
+(program
+  ;; Public API of t2-agc
+  (export (from "./types"           (named Priority TaskStatus MailboxOverflowPolicy CapabilityType RestartPolicy ChildType)))
+  (export (from "./agc_event"       (named AGCEvent)))
+  (export (from "./ring_buffer"     (named RingBuffer)))
+  (export (from "./capability"      (named Capability make_log_capability make_io_capability make_timer_capability make_random_capability)))
+  (export (from "./match_pattern"   (named match_pattern try_match_patterns compute_match_result)))
+  (export (from "./task"            (named Task)))
+  (export (from "./scheduler"       (named Scheduler)))
+  (export (from "./runtime_init"    (named init_runtime)))
+  (export (from "./runtime_spawn"   (named spawn)))
+  (export (from "./runtime_run"     (named run)))
+  (export (from "./runtime_send"    (named send)))
+  (export (from "./runtime_receive" (named receive)))
+  (export (from "./runtime_effect"  (named effect)))
+  (export (from "./otp"             (named restart_child registry_fn supervisor_fn))))
+```
+
+> **Note**: verify that t2lang supports `(export (from ...))` re-export syntax before writing this file. If not, the entry point must be hand-authored as `src/index.ts`.
+
+#### Verification
+
+After wiring, confirm all files compile:
+```sh
+npx t2tc --outDir dist src/*.t2
+```
+And check that `dist/index.js` re-exports correctly:
+```sh
+node -e "import('./dist/index.js').then(m => console.log(Object.keys(m)))"
+```
+
+---
 
 ### 2. Update `package.json`
 
-Add `main`, `types`, and `exports` fields pointing to the compiled output in `dist/`.
+The current `package.json` has `"main": "index.js"` (file doesn't exist) and no `exports` or `types` fields. Update:
+
+```json
+{
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types":  "./dist/index.d.ts"
+    }
+  }
+}
+```
+
+Also update the `build` script to include the new `index.t2`:
+```json
+"build": "rimraf dist && npx t2tc --outDir dist src/*.t2"
+```
+
+And update `build-tests` to compile all source files (with imports wired) alongside the tests into `dist-tests/`:
+```json
+"build-tests": "rimraf dist-tests && npx t2tc --outDir dist-tests src/*.t2 tests/*.t2"
+```
+
+(Tests import their dependencies by relative path, so compiling everything into the same `dist-tests/` folder is sufficient — matches the existing `ring_buffer.test.t2` pattern.)
+
+---
 
 ### 3. Write tests
 
-Vitest unit tests covering:
-- `ring_buffer`: push/to_array overflow and wrap-around
-- `match_pattern`: wildcards, literals, arrays, variables, nested
-- `scheduler`: spawn + run, yield round-trips, task completion
-- `send` / `receive`: basic delivery, selective receive, wake-up
-- `effect`: capability check, dispatch, rejection without capability
-- OTP: registry register/unregister/whereis, supervisor restart policies
-- Macros: `task`/`spawn_task`, `defprotocol` constructor generation, `defopaque` predicate and accessors
+Tests live in `tests/*.t2`, compile to `dist-tests/`, and are run by vitest via the `dist-tests/**/*.test.ts` glob already configured in `vitest.config.ts`. Use the `asrt` / `asrtDeep` helpers from `tests/asrt.t2` (already exists).
+
+The import pattern for a test file (see `ring_buffer.test.t2`):
+```t2
+(import (object (named (array (object (name "describe")) (object (name "it"))))) "vitest")
+(import (object (named (array (object (name "asrt")) (object (name "asrtDeep"))))) "./asrt")
+(import (object (named (array (object (name "MyThing"))))) "./my_thing")
+```
+
+#### `tests/match_pattern.test.t2`
+
+```
+describe "match_pattern"
+  it "wildcard matches anything"           → (match_pattern "_" 42 {}) = {}
+  it "literal string match"                → (match_pattern "ok" "ok" {}) = {}
+  it "literal string mismatch"             → (match_pattern "ok" "no" {}) = null
+  it "symbol binds value"                  → (match_pattern sym 42 {}) has {[sym]: 42}
+  it "array structural match"              → (match_pattern ["a" "_"] ["a" 1] {}) = {}
+  it "array length mismatch fails"         → (match_pattern ["a"] ["a" "b"] {}) = null
+  it "nested array match"                  → (match_pattern ["x" ["y" "_"]] ["x" ["y" 9]] {}) = {}
+  it "try_match_patterns returns true"     → try_match_patterns with matching pattern
+  it "try_match_patterns returns false"    → try_match_patterns with no match
+  it "compute_match_result returns result" → correct matched_pattern_index + bindings
+```
+
+#### `tests/scheduler.test.t2`
+
+```
+describe "Scheduler"
+  it "spawns a task and run completes it"
+      → spawn a generator that yields once then returns
+        init_runtime(); spawn(fn, [], "normal", new Set()); run()
+        check task.status === "done"
+  it "budget exhaustion re-queues task"
+      → spawn a task that yields 200 times; after run() all yields processed
+  it "pick_next_task respects priority order"
+      → spawn "idle" task then "critical" task; first picked is critical
+  it "on_task_crashed marks status and emits AGC code"
+      → task that throws; after run(), status === "crashed" and agc_codes_emitted non-empty
+```
+
+#### `tests/send_receive.test.t2`
+
+```
+describe "send / receive"
+  it "basic send then receive delivers message"
+      → task A sends to task B; task B receives and stores msg; check stored value
+  it "selective receive matches correct pattern"
+      → task receives two patterns; send the second; check matched_pattern_index === 1
+  it "send to non-existent pid emits AGC-M050"
+      → call send(9999, "x"); check agc_codes_emitted includes "AGC-M050"
+  it "mailbox overflow drop-oldest removes head"
+      → configure mailbox_max = 2; send 3 messages; mailbox has last 2
+```
+
+#### `tests/capability.test.t2`
+
+```
+describe "Capability"
+  it "can_perform returns true for allowed operation"
+  it "can_perform returns false for unknown operation"
+  it "make_log_capability allows info/warn/error/debug"
+  it "make_io_capability allows read/write/fetch"
+
+describe "effect (capability check)"
+  it "crashes task if capability not in task.capabilities set"
+      → spawn task that calls effect without the cap in capabilities
+        after run(), status === "crashed", AGC-CAP500 emitted
+  it "dispatches log effect successfully"
+      → spawn task with log cap; call effect(cap, "info", ["hello"])
+        run() completes without crash
+```
+
+#### `tests/otp.test.t2`
+
+```
+describe "Registry"
+  it "register then whereis returns pid"
+  it "unregister then whereis returns undefined"
+
+describe "Supervisor"
+  it "starts all child specs on init"
+      → supervisor with two specs; after run(), two child tasks spawned
+  it "permanent child restart on exit message"
+      → send ["exit" child_id "crash"] to supervisor; new pid spawned
+  it "temporary child not restarted on exit"
+      → send ["exit" child_id "normal"]; no new spawn for temporary child
+```

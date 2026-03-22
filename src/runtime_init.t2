@@ -4,7 +4,7 @@
 ;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
 ;;             Capability (capability.t2), AGCEvent (agc_event.t2)
 
-(fn init_runtime () : void
+(export (fn init_runtime () : void
   (let (scheduler : Scheduler) (new Scheduler))
   (set! (. globalThis __t2agc__)
     (object
@@ -82,5 +82,5 @@
 
           (weave_system_history
             (fn () : (type-array any)
-              (scheduler.orchestrator_history.to_array))))))))
+              (scheduler.orchestrator_history.to_array)))))))))
 )

@@ -4,11 +4,11 @@
 ;; the task with the effect's return value.
 ;; Depends on: Capability (capability.t2)
 
-(fn effect ((capability : Capability) (operation : string) (rest args : (type-array any))) : any
+(export (fn effect ((capability : Capability) (operation : string) (rest args : (type-array any))) : any
   (yield
     (object
       (type       "effect")
       (capability capability)
       (operation  operation)
-      (args       args))))
+      (args       args)))))
 )

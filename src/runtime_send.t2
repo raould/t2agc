@@ -3,7 +3,7 @@
 ;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
 ;;             match_pattern.t2, runtime_globals.t2
 
-(fn send ((target_pid : number) (msg : any)) : void
+(export (fn send ((target_pid : number) (msg : any)) : void
   ;; Deliver msg to target task's mailbox, applying overflow policy, then
   ;; wake the target if it is blocked on a matching receive.
   (let (scheduler : Scheduler)        (get_global_scheduler))
@@ -99,5 +99,5 @@
           (scheduler.waiting_tasks.delete target_pid)
           (scheduler.schedule target)
           (target.record_exceptional "woken_by_message"
-            (object (sender (ternary sender sender.id null)))))))))
+            (object (sender (ternary sender sender.id null))))))))))
 )

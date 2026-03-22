@@ -2,8 +2,8 @@
 ;; Layer 4 — Scheduler run loop entry point.
 ;; Depends on: Scheduler (scheduler.t2), runtime_globals.t2
 
-(fn run () : void
+(export (fn run () : void
   ;; Start the scheduler loop.  Blocks (synchronously) until all tasks finish.
   (let (scheduler : Scheduler) (get_global_scheduler))
-  (scheduler.run))
+  (scheduler.run)))
 )

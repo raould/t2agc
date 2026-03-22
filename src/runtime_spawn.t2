@@ -3,7 +3,7 @@
 ;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
 ;;             Capability (capability.t2), runtime_globals.t2
 
-(fn spawn
+(export (fn spawn
     ((gen_fn        : Function)
      (args          : (type-array any))
      (priority      : Priority)
@@ -21,5 +21,5 @@
       (timestamp (Date.now))
       (pid       pid)
       (priority  priority)))
-  pid)
+  pid))
 )

@@ -4,6 +4,6 @@
 ;; Used directly in generator-fn bodies; see defmacro receive for the
 ;; pattern-matching sugar.
 
-(fn receive () : any
-  (yield (object (type "receive") (patterns null))))
+(export (fn receive () : any
+  (yield (object (type "receive") (patterns null)))))
 )

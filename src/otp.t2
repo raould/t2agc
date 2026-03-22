@@ -2,6 +2,7 @@
   ;; Layer 6 — OTP: supervisors, registries, and the behavior macro.
   ;; Depends on: all previous layers.
   (macro-import m "./macros.t2m")
+  (import (object (named (array (object (name "get_global_scheduler")) (object (name "spawn")) (object (name "send"))))) "./runtime")
 
   ;; ── ChildSpec interface ───────────────────────────────────────────────────────
   ;; A ChildSpec describes how a supervisor should start and restart a child.
