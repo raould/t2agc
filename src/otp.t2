@@ -1,0 +1,68 @@
+(program
+  (import { Process } "./process")
+  (import { Pid } "./types")
+  (import { ProcessRegistry } "./process_registry")
+  (import { ExecutionContext } "./execution_context")
+  (import { Scheduler } "./scheduler")
+  (import { Task } "./task")
+  (import { AGCEvent } "./types")
+
+  (export (class OTP
+    (class-body
+      (field (registry : ProcessRegistry))
+      (field (context : ExecutionContext))
+      (field (scheduler : Scheduler))
+      (field (next_pid : Pid))
+
+      (constructor ()
+        (set! (. this registry) (new ProcessRegistry))
+        (set! (. this context) (new ExecutionContext))
+        (set! (. this scheduler) (new Scheduler (. this registry) (. this context)))
+        (set! (. this next_pid) 1)
+      )
+
+      (method spawn ((task_ : Task)) (returns Pid)
+        (let (pid : Pid) (. this next_pid))
+        (set! (. this next_pid) (+ (. this next_pid) 1))
+
+        (let (process : Process) (new Process pid task_))
+        (method-call (. this registry) "register" process)
+        (method-call (. (. this scheduler) tasks) "set" pid task_)
+        (method-call (. this scheduler) "schedule" process)
+
+        (return pid)
+      )
+
+      (method send ((pid : Pid) (event : AGCEvent)) (returns boolean)
+        (let (process : (union Process undefined)) (method-call (. this registry) "get" pid))
+        (if (=== process undefined)
+          (then (return false))
+        )
+        
+        (method-call process "send" event)
+        (method-call (. this scheduler) "schedule" process)
+        (return true)
+      )
+
+      (method self () (returns (union Pid undefined))
+        (let (current_process : (union Process undefined)) (method-call (. this context) "get_current"))
+        (if (=== current_process undefined)
+          (then (return undefined))
+        )
+        (return (. current_process pid))
+      )
+
+      (method start () (returns void)
+        (method-call (. this scheduler) "start")
+      )
+
+      (method stop () (returns void)
+        (method-call (. this scheduler) "stop")
+      )
+      
+      (method step () (returns boolean)
+        (return (method-call (. this scheduler) "run_next"))
+      )
+    )
+  ))
+)

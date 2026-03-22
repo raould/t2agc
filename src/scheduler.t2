@@ -1,0 +1,102 @@
+(program
+  (import { ProcessRegistry } "./process_registry")
+  (import { ExecutionContext } "./execution_context")
+  (import { Process } "./process")
+
+  (fn prio_val ((p : string)) : number
+    (if (=== p "critical") (then (return 0)))
+    (if (=== p "high") (then (return 1)))
+    (if (=== p "normal") (then (return 2)))
+    (if (=== p "low") (then (return 3)))
+    (return 4)
+  )
+
+  (export (class Scheduler
+    (class-body
+      (field (registry : ProcessRegistry))
+      (field (context : ExecutionContext))
+      (field (run_queue : (type-array Process)))
+      (field (running : boolean))
+      (field (tasks : any))
+
+      (constructor ((registry : ProcessRegistry) (context : ExecutionContext))
+        (set! (. this registry) registry)
+        (set! (. this context) context)
+        (set! (. this run_queue) (array))
+        (set! (. this running) false)
+        (set! (. this tasks) (new Map))
+      )
+
+      (method schedule ((process : Process)) (returns void)
+        (method-call (. this run_queue) "push" process)
+        (method-call (. this run_queue) "sort" (lambda ((a : Process) (b : Process))
+          (let (pa) (prio_val (. (. a task_) priority)))
+          (let (pb) (prio_val (. (. b task_) priority)))
+          (return (- pa pb))
+        ))
+      )
+
+      (method start () (returns void)
+        (set! (. this running) true)
+      )
+
+      (method stop () (returns void)
+        (set! (. this running) false)
+      )
+
+      (method run_next () (returns boolean)
+        (if (=== (. (. this run_queue) length) 0)
+          (then (return false))
+        )
+
+        (let (process : Process) (method-call (. this run_queue) "shift"))
+        (set! (. process status) "running")
+        (method-call (. this context) "set_current" process)
+
+        (let (res : any) undefined)
+
+        (if (=== (. process coroutine) undefined)
+          (then
+             (let (fn_) (. (. process task_) execute))
+             (set! (. process coroutine) (fn_)) ;; initialize generator
+             (set! res (method-call (. process coroutine) "next")) ;; run to first yield
+          )
+        )
+
+        (if (=== res undefined)
+          (then
+            ;; we need an event to continue
+            (let (event) (method-call process "receive"))
+            ;; wait, if mailbox is empty and process expects receive, it should suspend!
+            ;; if event is undefined, we shouldn't resume the coroutine unless it's a message
+            ;; wait... in a real actor loop, if not suspended, we run it?
+            (if (!== event undefined)
+              (then
+                (set! res (method-call (. process coroutine) "next" event))
+              )
+              (else
+                (set! res (object (done false))) ;; mock a suspended state
+              )
+            )
+          )
+        )
+
+        (method-call (. this context) "clear_current")
+        
+        (if (. res done)
+          (then
+            (set! (. process status) "dead")
+            (set! (. (. process task_) status) "done")
+          )
+          (else
+            (set! (. process status) "suspended")
+            ;; if event was undefined, we don't push it back to run_queue because it is waiting
+            ;; wait, my 'send' wakes it up! So we don't push it if it's waiting for receive and event was undefined.
+          )
+        )
+
+        (return true)
+      )
+    )
+  ))
+)

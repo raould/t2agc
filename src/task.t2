@@ -1,0 +1,17 @@
+(program
+  (import { AGCEvent } "./types")
+  (import { Priority } "./types")
+
+  (export (type TaskStatus (union (tlit "idle") (tlit "running") (tlit "completed") (tlit "failed"))))
+
+  (export (type ExecuteFn (tfn ((event AGCEvent)) void)))
+
+  (export (interface Task
+    (Task
+      (execute ExecuteFn)
+      (id number)
+      (priority Priority)
+      (status TaskStatus)
+    )
+  ))
+)

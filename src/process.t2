@@ -1,0 +1,39 @@
+(program
+  (import { Task } "./task")
+  (import { MessageQueue } "./message_queue")
+  (import { Pid } "./types")
+  (import { AGCEvent } "./types")
+
+  (export (type ProcessStatus (union (tlit "runnable") (tlit "running") (tlit "suspended") (tlit "dead"))))
+  
+  (export (class Process
+    (class-body
+      (field (pid : Pid))
+      (field (task_ : any))
+      (field (mailbox : MessageQueue))
+      (field (status : ProcessStatus))
+      (field (coroutine : any))
+
+      (constructor ((pid : Pid) (task_ : any))
+        (set! (. this pid) pid)
+        (set! (. this task_) task_)
+        (set! (. this mailbox) (new MessageQueue 100))
+        (set! (. this status) "runnable")
+        (set! (. this coroutine) undefined)
+      )
+
+      (method send ((event : any)) (returns void)
+        (method-call (. this mailbox) "enqueue" event)
+        (if (=== (. this status) "suspended")
+          (then
+            (set! (. this status) "runnable")
+          )
+        )
+      )
+
+      (method receive () (returns any)
+        (return (method-call (. this mailbox) "dequeue"))
+      )
+    )
+  ))
+)

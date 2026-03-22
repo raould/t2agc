@@ -1,0 +1,139 @@
+(program
+  (import { describe it } "vitest")
+  (import { asrt asrtDeep } "./asrt")
+  (import { init_runtime run spawn send get_global_scheduler } "./runtime")
+
+  ;; noop actor — exits immediately without any yields
+  (let (noop_fn)
+    (generator-fn () undefined))
+
+  ;; --- Phase 1: outside-actor lifecycle ---
+  (describe "Phase 1: outside-actor lifecycle"
+    (lambda ()
+
+      (it "noop actor reaches done" (lambda ()
+        (init_runtime)
+        (let (pid) (spawn noop_fn (array) "normal" (new Set)))
+        (run)
+        (let (sched) (get_global_scheduler))
+        (let (task) (method-call (. sched tasks) "get" pid))
+        (asrt (. task status) "done")))
+
+      (it "multiple actors all reach done" (lambda ()
+        (init_runtime)
+        (let (pid1) (spawn noop_fn (array) "normal" (new Set)))
+        (let (pid2) (spawn noop_fn (array) "high"   (new Set)))
+        (let (pid3) (spawn noop_fn (array) "low"    (new Set)))
+        (run)
+        (let (sched) (get_global_scheduler))
+        (asrt (. (method-call (. sched tasks) "get" pid1) status) "done")
+        (asrt (. (method-call (. sched tasks) "get" pid2) status) "done")
+        (asrt (. (method-call (. sched tasks) "get" pid3) status) "done")))
+
+      (it "critical priority runs before idle" (lambda ()
+        (init_runtime)
+        (let (order) (array))
+        (spawn
+          (generator-fn () (method-call order push "idle"))
+          (array) "idle" (new Set))
+        (spawn
+          (generator-fn () (method-call order push "critical"))
+          (array) "critical" (new Set))
+        (run)
+        (asrt (index order 0) "critical")
+        (asrt (index order 1) "idle")))
+
+      (it "send before run pre-seeds mailbox" (lambda ()
+        (init_runtime)
+        (let (box) (object (val null)))
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (set! (. box val) msg))
+          (array) "normal" (new Set)))
+        (send pid (array "hello"))
+        (run)
+        (asrtDeep (. box val) (array "hello"))))))
+
+  ;; --- Phase 2: intra-actor yield sequence ---
+  (describe "Phase 2: intra-actor yield sequence"
+    (lambda ()
+
+      (it "actor processes two sequential receives" (lambda ()
+        (init_runtime)
+        (let (box) (object (a null) (b null)))
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (m1) (yield (object (type "receive") (patterns null))))
+            (let (m2) (yield (object (type "receive") (patterns null))))
+            (set! (. box a) (index m1 0))
+            (set! (. box b) (index m2 0)))
+          (array) "normal" (new Set)))
+        (send pid (array "first"))
+        (send pid (array "second"))
+        (run)
+        (asrt (. box a) "first")
+        (asrt (. box b) "second")))
+
+      (it "ping-pong between two actors" (lambda ()
+        (init_runtime)
+        (let (box) (object (val null)))
+        ;; ping waits for a reply and records it
+        (let (ping_pid) (spawn
+          (generator-fn ()
+            (let (reply) (yield (object (type "receive") (patterns null))))
+            (set! (. box val) (index reply 0)))
+          (array) "normal" (new Set)))
+        ;; pong receives a message containing reply-to pid and sends "pong" back
+        (let (pong_pid) (spawn
+          (generator-fn ()
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (send (index msg 0) (array "pong")))
+          (array) "normal" (new Set)))
+        ;; outer orchestrator delivers ping_pid to pong
+        (send pong_pid (array ping_pid))
+        (run)
+        (asrt (. box val) "pong")))))
+
+  ;; --- Phase 3: RuntimeBuilder call-order equivalence ---
+  (describe "Phase 3: call-order equivalence"
+    (lambda ()
+
+      (it "scheduler is non-null after init_runtime" (lambda ()
+        (init_runtime)
+        (let (sched) (get_global_scheduler))
+        (asrt (! (=== sched null)) true)
+        (asrt (! (=== sched undefined)) true)))
+
+      (it "spawn returns valid pid before run" (lambda ()
+        (init_runtime)
+        (let (pid) (spawn noop_fn (array) "normal" (new Set)))
+        (asrt (>= pid 0) true)
+        (let (task) (method-call (. (get_global_scheduler) tasks) "get" pid))
+        (asrt (! (=== task undefined)) true)))
+
+      (it "send before run delivers during run" (lambda ()
+        (init_runtime)
+        (let (box) (object (received false)))
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (set! (. box received) true))
+          (array) "normal" (new Set)))
+        (send pid (array "trigger"))
+        (run)
+        (asrt (. box received) true)))
+
+      (it "full order: caps -> init -> spawn -> send -> run" (lambda ()
+        (let (caps) (new Set))
+        (init_runtime)
+        (let (box) (object (val null)))
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (set! (. box val) (index msg 0)))
+          (array) "normal" caps))
+        (send pid (array "lifecycle-ok"))
+        (run)
+        (asrt (. box val) "lifecycle-ok")
+        (asrt (. (get_global_scheduler) running) false))))))

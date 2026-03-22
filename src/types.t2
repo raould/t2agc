@@ -1,0 +1,72 @@
+(program
+  (type Pid number)
+  (type Priority (union (tlit "critical") (tlit "high") (tlit "normal") (tlit "low") (tlit "idle")))
+  (type TaskStatus (union (tlit "runnable") (tlit "waiting") (tlit "done") (tlit "crashed")))
+  (type Message (type-array any))
+
+  (interface AGCEvent
+    (AGCEvent
+      (code string)
+      (severity (union (tlit "warn") (tlit "error") (tlit "critical")))
+      (timestamp number)
+      (pid Pid)
+      (detail string)))
+
+  (interface CapabilitySpec
+    (CapabilitySpec
+      (type_ string)
+      (operations (type-array string))))
+
+  (interface IBindSlot
+    (IBindSlot
+      (kind (tlit "bind"))
+      (name string)))
+
+  (interface ILiteralSlot
+    (ILiteralSlot
+      (kind (tlit "literal"))
+      (value (union string number boolean null))))
+
+  (interface IWildcardSlot
+    (IWildcardSlot
+      (kind (tlit "wildcard"))))
+
+  (type IPatternArg (union IBindSlot ILiteralSlot IWildcardSlot))
+
+  (interface IPattern
+    (IPattern
+      (op string)
+      (args (type-array IPatternArg))))
+
+  (interface ReceivePrimitive
+    (ReceivePrimitive
+      (type_ (tlit "receive"))
+      (patterns (type-array IPattern))))
+
+  (interface ReceiveResult
+    (ReceiveResult
+      (index_ number)
+      (message Message)
+      (bindings any)))
+
+  (interface SpawnPrimitive
+    (SpawnPrimitive
+      (type_ (tlit "spawn"))
+      (fn_ any)
+      (args (type-array any))
+      (priority? Priority)
+      (capabilities? (type-array CapabilitySpec))
+      (mailbox_limit? number)))
+
+  (interface SendPrimitive
+    (SendPrimitive
+      (type_ (tlit "send"))
+      (to Pid)
+      (msg Message)))
+
+  (interface ExitPrimitive
+    (ExitPrimitive
+      (type_ (tlit "exit"))
+      (reason any)))
+
+  (export-named (Pid) (Priority) (TaskStatus) (Message) (AGCEvent) (CapabilitySpec) (IBindSlot) (ILiteralSlot) (IWildcardSlot) (IPatternArg) (IPattern) (ReceivePrimitive) (ReceiveResult) (SpawnPrimitive) (SendPrimitive) (ExitPrimitive)))

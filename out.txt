@@ -1,0 +1,163 @@
+
+ RUN  v3.2.4 /home/superman/Dev/t2agc
+
+ ❯ dist-tests/lifecycle.test.ts (10 tests | 10 failed) 16ms
+   × Phase 1: outside-actor lifecycle > noop actor reaches done 10ms
+     → OTPClass is not a constructor
+   × Phase 1: outside-actor lifecycle > multiple actors all reach done 1ms
+     → OTPClass is not a constructor
+   × Phase 1: outside-actor lifecycle > critical priority runs before idle 1ms
+     → OTPClass is not a constructor
+   × Phase 1: outside-actor lifecycle > send before run pre-seeds mailbox 0ms
+     → OTPClass is not a constructor
+   × Phase 2: intra-actor yield sequence > actor processes two sequential receives 1ms
+     → OTPClass is not a constructor
+   × Phase 2: intra-actor yield sequence > ping-pong between two actors 0ms
+     → OTPClass is not a constructor
+   × Phase 3: call-order equivalence > scheduler is non-null after init_runtime 0ms
+     → OTPClass is not a constructor
+   × Phase 3: call-order equivalence > spawn returns valid pid before run 0ms
+     → OTPClass is not a constructor
+   × Phase 3: call-order equivalence > send before run delivers during run 0ms
+     → OTPClass is not a constructor
+   × Phase 3: call-order equivalence > full order: caps -> init -> spawn -> send -> run 0ms
+     → OTPClass is not a constructor
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 10 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 1: outside-actor lifecycle > noop actor reaches done
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:9:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/10]⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 1: outside-actor lifecycle > multiple actors all reach done
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:17:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/10]⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 1: outside-actor lifecycle > critical priority runs before idle
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:28:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/10]⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 1: outside-actor lifecycle > send before run pre-seeds mailbox
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:41:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/10]⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 2: intra-actor yield sequence > actor processes two sequential receives
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:59:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/10]⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 2: intra-actor yield sequence > ping-pong between two actors
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:83:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/10]⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 3: call-order equivalence > scheduler is non-null after init_runtime
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:108:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/10]⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 3: call-order equivalence > spawn returns valid pid before run
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:114:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/10]⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 3: call-order equivalence > send before run delivers during run
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:121:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/10]⎯
+
+ FAIL  dist-tests/lifecycle.test.ts > Phase 3: call-order equivalence > full order: caps -> init -> spawn -> send -> run
+TypeError: OTPClass is not a constructor
+ ❯ init_runtime dist-tests/runtime.ts:11:16
+      9| let global_otp: OTP | undefined = undefined;
+     10| export function init_runtime(): void {
+     11|   global_otp = new OTPClass();
+       |                ^
+     12| }
+     13| export function get_global_scheduler(): Scheduler | undefined {
+ ❯ dist-tests/lifecycle.test.ts:138:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/10]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  10 failed (10)
+   Start at  13:15:06
+   Duration  720ms (transform 74ms, setup 0ms, collect 69ms, tests 16ms, environment 0ms, prepare 114ms)
+

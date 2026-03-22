@@ -1,0 +1,70 @@
+(program
+  (export (class RingBuffer
+    (type-params (T))
+    (class-body
+      (field (buffer : (type-array T)))
+      (field (capacity : number))
+      (field (head : number))
+      (field (tail : number))
+      (field (size_ : number))
+
+      (constructor ((capacity : number))
+        (set! (. this buffer) (new Array capacity))
+        (set! (. this capacity) capacity)
+        (set! (. this head) 0)
+        (set! (. this tail) 0)
+        (set! (. this size_) 0)
+      )
+
+      (method push ((item : T)) (returns void)
+        ((. this buffer) [ (. this tail) ] = item)
+        (set! (. this tail) (% (+ (. this tail) 1) (. this capacity)))
+        (if (< (. this size_) (. this capacity))
+          (then
+            (set! (. this size_) (+ (. this size_) 1))
+          )
+          (else
+            (set! (. this head) (% (+ (. this head) 1) (. this capacity)))
+          )
+        )
+      )
+
+      (method pop () (returns (union T undefined))
+        (if (=== (. this size_) 0)
+          (then (return undefined))
+        )
+        (let (item : T) (index (. this buffer) (. this head)))
+        ((. this buffer) [ (. this head) ] = undefined) ;; Clear ref
+        (set! (. this head) (% (+ (. this head) 1) (. this capacity)))
+        (set! (. this size_) (- (. this size_) 1))
+        (return item)
+      )
+
+      (method peek () (returns (union T undefined))
+        (if (=== (. this size_) 0)
+          (then (return undefined))
+        )
+        (return (index (. this buffer) (. this head)))
+      )
+
+      (method size () (returns number)
+        (return (. this size_))
+      )
+
+      (method is_empty () (returns boolean)
+        (return (=== (. this size_) 0))
+      )
+
+      (method is_full () (returns boolean)
+        (return (=== (. this size_) (. this capacity)))
+      )
+
+      (method clear () (returns void)
+        (set! (. this buffer) (new Array (. this capacity)))
+        (set! (. this head) 0)
+        (set! (. this tail) 0)
+        (set! (. this size_) 0)
+      )
+    )
+  ))
+)

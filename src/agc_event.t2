@@ -1,0 +1,17 @@
+(program
+  (import { AGCEvent Pid Priority } "./types")
+
+  (export-named (create_event) (create_warn) (create_error) (create_critical))
+
+  (fn create_event ((code : string) (severity : Priority) (timestamp : number) (pid : Pid) (detail : string)) : AGCEvent
+    (return (object (code code) (severity severity) (timestamp timestamp) (pid pid) (detail detail))))
+
+  (fn create_warn ((code : string) (timestamp : number) (pid : Pid) (detail : string)) : AGCEvent
+    (return (create_event code "warn" timestamp pid detail)))
+
+  (fn create_error ((code : string) (timestamp : number) (pid : Pid) (detail : string)) : AGCEvent
+    (return (create_event code "error" timestamp pid detail)))
+
+  (fn create_critical ((code : string) (timestamp : number) (pid : Pid) (detail : string)) : AGCEvent
+    (return (create_event code "critical" timestamp pid detail)))
+)

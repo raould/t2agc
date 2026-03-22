@@ -1,0 +1,41 @@
+(program
+  (import { AGCEvent } "./types")
+  (import { RingBuffer } "./ring_buffer")
+  (export (class MessageQueue
+    (class-body
+      (field (buffer : (type-app RingBuffer AGCEvent)))
+      (constructor ((capacity : number))
+        (set! (. this buffer) (new RingBuffer capacity))
+      )
+      
+      (method enqueue ((event : AGCEvent)) (returns void)
+        (if (method-call (. this buffer) "is_full")
+            (then
+              (method-call (. this buffer) "pop")
+            )
+        )
+        (method-call (. this buffer) "push" event)
+      )
+
+      (method dequeue () (returns (union AGCEvent undefined))
+        (return (method-call (. this buffer) "pop"))
+      )
+
+      (method is_empty () (returns boolean)
+        (return (method-call (. this buffer) "is_empty"))
+      )
+
+      (method is_full () (returns boolean)
+        (return (method-call (. this buffer) "is_full"))
+      )
+
+      (method size () (returns number)
+        (return (method-call (. this buffer) "size"))
+      )
+
+      (method clear () (returns void)
+        (method-call (. this buffer) "clear")
+      )
+    )
+  ))
+)

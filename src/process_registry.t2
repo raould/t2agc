@@ -1,0 +1,30 @@
+(program
+  (import { Process } "./process")
+  (import { Pid } "./types")
+
+  (export (class ProcessRegistry
+    (class-body
+      (field (processes : (type-app Map Pid Process)))
+
+      (constructor ()
+        (set! (. this processes) (new Map))
+      )
+
+      (method register ((process : Process)) (returns void)
+        (method-call (. this processes) "set" (. process pid) process)
+      )
+
+      (method unregister ((pid : Pid)) (returns void)
+        (method-call (. this processes) "delete" pid)
+      )
+
+      (method get ((pid : Pid)) (returns (union Process undefined))
+        (return (method-call (. this processes) "get" pid))
+      )
+      
+      (method get_all () (returns (type-array Process))
+        (return (method-call Array "from" (method-call (. this processes) "values")))
+      )
+    )
+  ))
+)

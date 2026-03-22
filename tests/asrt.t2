@@ -1,0 +1,13 @@
+(program
+  (import { expect } "vitest")
+
+  (fn asrt ((actual : any) (expected : any)) : void
+    (method-call (expect actual) "toBe" expected)
+  )
+
+  (fn asrtDeep ((actual : any) (expected : any)) : void
+    (method-call (expect actual) "toEqual" expected)
+  )
+  
+  (export-named (asrt) (asrtDeep))
+)

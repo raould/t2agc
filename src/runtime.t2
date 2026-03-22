@@ -1,0 +1,47 @@
+(program
+  (import { Process } "./process")
+  (import { Pid } "./types")
+  (import { Task } "./task")
+  (import { Scheduler } "./scheduler")
+  (import { AGCEvent } "./types")
+  (import { ReceiveResult CapabilitySpec } "./types")
+
+  (import { OTP } "./otp")
+
+  (let (global_otp : (union OTP undefined)) undefined)
+
+  (export (fn init_runtime () : void
+    (set! global_otp (new OTP))
+  ))
+
+  (export (fn get_global_scheduler () : (union Scheduler undefined)
+    (if (=== global_otp undefined)
+      (then (return undefined))
+    )
+    (return (. global_otp scheduler))
+  ))
+
+  (export (fn spawn ((fn_ : any) (args : (type-array any)) (priority : string) (caps : any)) : Pid
+    (if (=== global_otp undefined)
+      (then (return -1))
+    )
+    (let (task : any) (object (execute fn_) (id 0) (priority priority) (status "idle")))
+    (return (method-call global_otp "spawn" task))
+  ))
+
+  (export (fn send ((pid : Pid) (msg : any)) : void
+    (if (=== global_otp undefined)
+      (then (return undefined))
+    )
+    (method-call global_otp "send" pid msg)
+  ))
+
+  (export (fn run () : void
+    (if (=== global_otp undefined)
+      (then (return undefined))
+    )
+    (while (method-call global_otp "step")
+      (let (ignore) 1)
+    )
+  ))
+)

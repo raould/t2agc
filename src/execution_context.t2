@@ -1,0 +1,25 @@
+(program
+  (import { Process } "./process")
+
+  (export (class ExecutionContext
+    (class-body
+      (field (current_process : (union Process undefined)))
+
+      (constructor ()
+        (set! (. this current_process) undefined)
+      )
+
+      (method set_current ((process : Process)) (returns void)
+        (set! (. this current_process) process)
+      )
+
+      (method clear_current () (returns void)
+        (set! (. this current_process) undefined)
+      )
+
+      (method get_current () (returns (union Process undefined))
+        (return (. this current_process))
+      )
+    )
+  ))
+)
