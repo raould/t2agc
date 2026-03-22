@@ -1,0 +1,4 @@
+(program
+  (macro-import q "./probe_minimal.t2m")
+  (const r (q/hello 5))
+)

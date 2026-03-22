@@ -87,5 +87,16 @@
 
           (weave_system_history
             (fn () : (type-array any)
-              (scheduler.orchestrator_history.to_array)))))))))
+              (scheduler.orchestrator_history.to_array))))))
+
+  ;; Install current_generator as a globalThis function so macro-generated task
+  ;; bodies (m/task) can call it.  The scheduler sets current_task in
+  ;; execute_slice before calling gen.next(), so this is non-null during task execution.
+  (set! (. globalThis current_generator)
+    (fn () : any
+      (let (sched : Scheduler) (. (. globalThis __t2agc__) scheduler))
+      (if (. sched current_task)
+        (then (return (. (. sched current_task) gen)))
+        (else (return null)))))
+)))
 )
