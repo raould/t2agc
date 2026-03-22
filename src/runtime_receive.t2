@@ -1,9 +1,10 @@
 (program
-;; Layer 4 — Receive primitive (yield to scheduler).
-;; The task is resumed with the first incoming message as the yield value.
-;; Used directly in generator-fn bodies; see defmacro receive for the
-;; pattern-matching sugar.
+;; Layer 4 — Receive primitive descriptor.
+;; Returns the yield object that a task generator must yield to pause on receive.
+;; Usage in a task: (let (msg) (yield (receive)))
+;; The scheduler sees step.value, routes to handle_receive, and resumes
+;; the generator with the incoming message as the yield value.
 
-(export (fn receive () : any
-  (yield (object (type "receive") (patterns null)))))
+(export (fn receive () : object
+  (return (object (type "receive") (patterns null)))))
 )

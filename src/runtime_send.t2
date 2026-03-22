@@ -3,6 +3,9 @@
 ;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
 ;;             match_pattern.t2, runtime_globals.t2
 
+(import (object (named (array (object (name "compute_match_result")) (object (name "match_pattern"))))) "./match_pattern")
+(import (object (named (array (object (name "get_global_scheduler"))))) "./runtime_globals")
+
 (export (fn send ((target_pid : number) (msg : any)) : void
   ;; Deliver msg to target task's mailbox, applying overflow policy, then
   ;; wake the target if it is blocked on a matching receive.

@@ -1,6 +1,11 @@
 # **t2‑agc: Core Design Document (Canonical Edition)**  
 ### *A tiny, deterministic, actor‑style execution model inspired by the Apollo Guidance Computer*
 
+* See also OTP.md
+* See also HOTSWAP.md
+* See also DLITE.md
+* See also EXAMPLES.md
+
 ---
 
 # 1. Overview

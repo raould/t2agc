@@ -37,7 +37,7 @@
         (public priority     : Priority)
         (public capabilities : (type-app Set Capability)))
         (set! this.name                (|| gen_fn.name (+ "task-" (String id))))
-        (set! this.gen                 (apply gen_fn args))
+        (set! this.gen                 (gen_fn.apply null args))
         (set! this.history_effects     (new RingBuffer 100))
         (set! this.history_exceptional (new RingBuffer 50))
         (set! this.history_critical    (new RingBuffer 20))

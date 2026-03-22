@@ -127,21 +127,24 @@
 
       (method handle_primitive ((task : any) (primitive : any)) (returns any)
         ; "Dispatch a yielded primitive; return the resume value for the next gen.next()."
+        ;; A plain (yield) or (yield undefined) yields undefined — treat as no-op.
+        (if (! primitive)
+          (then (return undefined)))
         (switch (. primitive type)
           (case "yield"
-            undefined)
+            (return undefined))
 
           (case "receive"
-            (this.handle_receive task (. primitive patterns)))
+            (return (this.handle_receive task (. primitive patterns))))
 
           (case "effect"
-            (this.handle_effect task
+            (return (this.handle_effect task
               (. primitive capability)
               (. primitive operation)
-              (. primitive args)))
+              (. primitive args))))
 
           (default
-            (this.crash_unknown_primitive task primitive))))
+            (return (this.crash_unknown_primitive task primitive)))))
 
       (method crash_unknown_primitive ((task : any) (primitive : any)) (returns any)
         ; "Emit an AGC error code and mark task as crashed; returns undefined."
@@ -161,7 +164,7 @@
           (let (task : any) (this.pick_next_task))
           (if task
             (then (this.execute_slice task))
-            (else (if (== (this.waiting_tasks.size) 0)
+            (else (if (== (. this.waiting_tasks size) 0)
               (then (set! this.running false))
               ;; Only waiting tasks remain — yield control to event loop
               ;; TODO: in async context use setImmediate/setTimeout
@@ -384,20 +387,21 @@
           (capability : any)) (returns any)
         (switch operation
           (case "fetch"
-            (let (url : string) (index args 0))
+            (let (fetch_url : string) (index args 0))
             (if (&& capability.metadata.allowedHosts
                     (> capability.metadata.allowedHosts.length 0))
               (then
-                (let (host : string) (extract_host url))
-                (if (! (capability.metadata.allowedHosts.includes host))
-                  (then (throw (new Error (+ "Host not allowed: " host)))))))
-            (await (fetch url)))
+                (let (fetch_host : string) (extract_host fetch_url))
+                (if (! (capability.metadata.allowedHosts.includes fetch_host))
+                  (then (throw (new Error (+ "Host not allowed: " fetch_host)))))))
+            ;; TODO: fetch requires async scheduler; stub until then
+            (throw (new Error "effect_io 'fetch' not yet supported in sync scheduler")))
           (case "read"
-            (let (path : string) (index args 0))
+            (let (read_path : string) (index args 0))
             (throw (new Error "effect_io 'read' not yet implemented")))
           (case "write"
-            (let (path : string) (index args 0))
-            (let (data : any)   (index args 1))
+            (let (write_path : string) (index args 0))
+            (let (write_data : any)   (index args 1))
             (throw (new Error "effect_io 'write' not yet implemented")))))
 
       (method effect_timer ((operation : string) (args : (type-array any))) (returns any)
@@ -407,25 +411,25 @@
             ;; TODO: suspend task and resume after timeout (requires async scheduler)
             (throw (new Error "effect_timer 'sleep' requires async scheduler")))
           (case "set_timeout"
-            (let (callback : any) (index args 0))
-            (let (ms       : number)   (index args 1))
-            (setTimeout callback ms))
+            (let (to_callback : any)    (index args 0))
+            (let (to_ms       : number) (index args 1))
+            (setTimeout to_callback to_ms))
           (case "set_interval"
-            (let (callback : any) (index args 0))
-            (let (ms       : number)   (index args 1))
-            (setInterval callback ms))))
+            (let (ti_callback : any)    (index args 0))
+            (let (ti_ms       : number) (index args 1))
+            (setInterval ti_callback ti_ms))))
 
       (method effect_random ((operation : string) (args : (type-array any))) (returns any)
         (switch operation
           (case "next"
             (Math.random))
           (case "next_int"
-            (let (max : number) (index args 0))
-            (Math.floor (* (Math.random) max)))
+            (let (ni_max : number) (index args 0))
+            (Math.floor (* (Math.random) ni_max)))
           (case "next_float"
-            (let (min : number) (index args 0))
-            (let (max : number) (index args 1))
-            (+ min (* (Math.random) (- max min))))))
+            (let (nf_min : number) (index args 0))
+            (let (nf_max : number) (index args 1))
+            (+ nf_min (* (Math.random) (- nf_max nf_min))))))
 
       ;; ── AGC code emission ─────────────────────────────────────────────────
 

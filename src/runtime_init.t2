@@ -4,6 +4,11 @@
 ;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
 ;;             Capability (capability.t2), AGCEvent (agc_event.t2)
 
+(import (object (named (array (object (name "Scheduler"))))) "./scheduler")
+(import (object (named (array (object (name "Task"))))) "./task")
+(import (object (named (array (object (name "Capability"))))) "./capability")
+(import (object (named (array (object (name "AGCEvent"))))) "./agc_event")
+
 (export (fn init_runtime () : void
   (let (scheduler : Scheduler) (new Scheduler))
   (set! (. globalThis __t2agc__)
@@ -15,7 +20,7 @@
           (list_tasks
             (fn () : (type-array any)
               (let (result : (type-array any)) (array))
-              (scheduler.tasks.for_each
+              (scheduler.tasks.forEach
                 (lambda ((task : Task) (pid : number))
                   (result.push
                     (object

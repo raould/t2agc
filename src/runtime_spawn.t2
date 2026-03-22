@@ -3,6 +3,9 @@
 ;; Depends on: Scheduler (scheduler.t2), Task (task.t2),
 ;;             Capability (capability.t2), runtime_globals.t2
 
+(import (object (named (array (object (name "Task"))))) "./task")
+(import (object (named (array (object (name "get_global_scheduler"))))) "./runtime_globals")
+
 (export (fn spawn
     ((gen_fn        : Function)
      (args          : (type-array any))
@@ -21,5 +24,5 @@
       (timestamp (Date.now))
       (pid       pid)
       (priority  priority)))
-  pid))
+  (return pid)))
 )

@@ -110,7 +110,7 @@
               (case "temporary" null))))))
 
     ;; Start all children on init
-    (for_each child_specs (lambda ((spec : any))
+    (child_specs.forEach (lambda ((spec : any))
       (let (pid : number) (restart_child spec))
       (children.set spec.id pid)))
 
