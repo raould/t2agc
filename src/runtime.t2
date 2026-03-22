@@ -25,8 +25,18 @@
     (if (=== global_otp undefined)
       (then (return -1))
     )
-    (let (task : any) (object (execute fn_) (id 0) (priority priority) (status "idle")))
+    (let (execute_fn) (lambda () 
+         (return (method-call fn_ "apply" null args))
+    ))
+    (let (task : any) (object (execute execute_fn) (id 0) (priority priority) (status "idle")))
     (return (method-call global_otp "spawn" task))
+  ))
+
+  (export (fn self () : (union Pid undefined)
+    (if (=== global_otp undefined)
+      (then (return undefined))
+    )
+    (return (method-call global_otp "self"))
   ))
 
   (export (fn send ((pid : Pid) (msg : any)) : void

@@ -1,0 +1,209 @@
+(program
+  (import { describe it } "vitest")
+  (import { asrt asrtDeep } "./asrt")
+  (import { init_runtime run spawn send self get_global_scheduler } "./runtime")
+
+  (describe "EXAMPLES.md integration tests" (lambda ()
+
+    (it "1. Ping-Pong matches expected termination state" (lambda ()
+      (init_runtime)
+      (let (box) (object (ping_done false) (pong_done false)))
+      
+      (let (ping_fn) (generator-fn ()
+        (let (running) true)
+        (while running
+          (let (msg) (yield (object (type "receive") (patterns null))))
+          (if (=== (index msg 0) "start")
+            (then
+              (send (index msg 2) (array "ping" (index msg 1) (self)))
+            )
+            (else
+              (if (=== (index msg 0) "pong")
+                (then
+                  (let (n) (index msg 1))
+                  (if (> n 0)
+                    (then
+                      (send (index msg 2) (array "ping" (- n 1) (self)))
+                    )
+                    (else
+                      (send (index msg 2) (array "ping" 0 (self)))
+                      (set! (. box ping_done) true)
+                      (set! running false)
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      ))
+
+      (let (pong_fn) (generator-fn ()
+        (let (running) true)
+        (while running
+          (let (msg) (yield (object (type "receive") (patterns null))))
+          (if (=== (index msg 0) "ping")
+            (then
+              (let (n) (index msg 1))
+              (if (> n 0)
+                 (then
+                   (send (index msg 2) (array "pong" (- n 1) (self)))
+                 )
+                 (else
+                   (set! (. box pong_done) true)
+                   (set! running false)
+                 )
+              )
+            )
+          )
+        )
+      ))
+
+      (let (ping_pid) (spawn ping_fn (array) "normal" (new Set)))
+      (let (pong_pid) (spawn pong_fn (array) "normal" (new Set)))
+      
+      (send ping_pid (array "start" 3 pong_pid))
+      (run)
+      
+      (asrt (. box ping_done) true)
+      (asrt (. box pong_done) true)
+    ))
+
+
+    (it "2. Echo Server handles multiple clients" (lambda ()
+      (init_runtime)
+      (let (box) (object (server_handled 0) (client1_done false) (client2_done false)))
+
+      (let (echo_server) (generator-fn ()
+        (let (running) true)
+        (while running
+          (let (msg) (yield (object (type "receive") (patterns null))))
+          (console.log "Server received: " msg)
+          (if (=== (index msg 0) "echo")
+            (then
+              (let (from) (index msg 1))
+              (let (payload) (index msg 2))
+              (send from (array "reply" payload))
+              (set! (. box server_handled) (+ (. box server_handled) 1))
+            )
+            (else
+              (if (=== (index msg 0) "stop")
+                (then (set! running false))
+              )
+            )
+          )
+        )
+      ))
+
+      (let (client_fn) (generator-fn ((server_pid) (my_id))
+        (send server_pid (array "echo" (self) (+ "hello from " my_id)))
+        (let (reply) (yield (object (type "receive") (patterns null))))
+        (console.log "Client received: " reply " (expected: " (+ "hello from " my_id) ")")
+        (if (=== (index reply 1) (+ "hello from " my_id))
+          (then
+            (if (=== my_id "c1") (then (set! (. box client1_done) true)))
+            (if (=== my_id "c2") (then (set! (. box client2_done) true)))
+          )
+        )
+      ))
+
+      (let (server_pid) (spawn echo_server (array) "normal" (new Set)))
+      (spawn client_fn (array server_pid "c1") "normal" (new Set))
+      (spawn client_fn (array server_pid "c2") "normal" (new Set))
+      
+      (run)
+      
+      (asrt (. box client1_done) true)
+      (asrt (. box client2_done) true)
+      (asrt (. box server_handled) 2)
+    ))
+
+    (it "3. Counter Actor maintains internal state" (lambda ()
+      (init_runtime)
+      (let (box) (object (final_count 0) (client_done false)))
+
+      (let (counter_server) (generator-fn ()
+        (let (state) 0)
+        (let (running) true)
+        (while running
+          (let (msg) (yield (object (type "receive") (patterns null))))
+          (if (=== (index msg 0) "inc")
+            (then
+              (set! state (+ state (index msg 1)))
+            )
+            (else
+              (if (=== (index msg 0) "get")
+                (then
+                  (send (index msg 1) (array "reply" state))
+                )
+                (else
+                  (if (=== (index msg 0) "stop")
+                    (then (set! running false))
+                  )
+                )
+              )
+            )
+          )
+        )
+      ))
+
+      (let (client_fn) (generator-fn ((server_pid))
+        (send server_pid (array "inc" 5))
+        (send server_pid (array "inc" 10))
+        (send server_pid (array "get" (self)))
+        
+        (let (reply) (yield (object (type "receive") (patterns null))))
+        (set! (. box final_count) (index reply 1))
+        (set! (. box client_done) true)
+      ))
+
+      (let (server_pid) (spawn counter_server (array) "normal" (new Set)))
+      (spawn client_fn (array server_pid) "normal" (new Set))
+      
+      (run)
+      
+      (asrt (. box client_done) true)
+      (asrt (. box final_count) 15)
+    ))
+
+    (it "4. Ring of Processes forwards a token" (lambda ()
+      (init_runtime)
+      (let (box) (object (final_received false) (nodes_passed 0)))
+
+      (let (node_fn) (generator-fn ((my_id) (next_pid))
+        (let (msg) (yield (object (type "receive") (patterns null))))
+        (if (=== (index msg 0) "token")
+          (then
+            (let (hops) (index msg 1))
+            (if next_pid
+              (then
+                (send next_pid (array "token" (+ hops 1)))
+              )
+              (else
+                (set! (. box final_received) true)
+                (set! (. box nodes_passed) hops)
+              )
+            )
+          )
+        )
+      ))
+
+      (let (N) 100)
+      (let (i) 0)
+      (let (prev_pid) undefined)
+
+      (while (< i N)
+        (set! prev_pid (spawn node_fn (array (- N i) prev_pid) "normal" (new Set)))
+        (set! i (+ i 1))
+      )
+
+      ;; the last spawned pid is the first node to receive the token
+      (send prev_pid (array "token" 1))
+
+      (run)
+      
+      (asrt (. box final_received) true)
+      (asrt (. box nodes_passed) 100)
+    ))
+  ))
+)
