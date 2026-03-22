@@ -18,7 +18,7 @@
 
   ;; ── restart_child ─────────────────────────────────────────────────────────────
 
-  (fn restart_child ((spec : any)) : void
+  (fn restart_child ((spec : any)) : number
     ; "Spawn a child according to its ChildSpec and record the restart."
     (let (scheduler : Scheduler) (get_global_scheduler))
 
@@ -36,7 +36,7 @@
             s)
           (new Set))))
 
-    pid)
+    (return pid))
 
 
   ;; ── Registry task ─────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@
           (if (== spec.id child_id)
             (then (set! found spec)))
           (set! i (+ i 1)))
-        found))
+        (return found)))
 
     ;; Helper: handle a child-exit message
     (let (handle_exit)
