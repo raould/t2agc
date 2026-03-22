@@ -42,11 +42,11 @@
   ;; ── Registry task ─────────────────────────────────────────────────────────────
   ;; Simple name → pid registry.  Spawn one instance at startup.
 
-  (m/task registry (_unused)
+  (m/task registry (_unused) =&
     (let (names : (type-app Map string number)) (new Map))
 
     (while true
-      (m/receive
+      (m/receive =&
         ((array "register" name pid)
           (names.set name pid))
 
@@ -62,7 +62,7 @@
   ;; Standard one-for-one supervisor.  Restart intensity (max_restarts / max_time)
   ;; is tracked but enforcement is left as a TODO.
 
-  (m/task supervisor (child_specs strategy max_restarts max_time)
+  (m/task supervisor (child_specs strategy max_restarts max_time) =&
     (let (children       : (type-app Map symbol number))         (new Map))
     (let (restart_counts : (type-app Map symbol (type-array number))) (new Map))
 
@@ -86,37 +86,36 @@
           (set! i (+ i 1)))
         found))
 
+    ;; Helper: handle a child-exit message
+    (let (handle_exit)
+      (lambda ((child_id : symbol) (reason : any))
+        (let (spec : any) (find_spec child_id))
+        (if spec
+          (then
+            (switch spec.restart_policy
+              (case "permanent"
+                (update_restart_count child_id)
+                (let (new_pid : number) (restart_child spec))
+                (children.set spec.id new_pid))
+
+              (case "transient"
+                (if (!= reason "normal")
+                  (then
+                    (update_restart_count child_id)
+                    (let (new_pid : number) (restart_child spec))
+                    (children.set spec.id new_pid))
+                  (else null)))
+
+              (case "temporary" null))))))
+
     ;; Start all children on init
     (for_each child_specs (lambda ((spec : any))
       (let (pid : number) (restart_child spec))
       (children.set spec.id pid)))
 
     (while true
-      (m/receive
-        ;; Child exited
-        ((array "exit" child_id reason)
-          (let (spec : any) (find_spec child_id))
-          (if spec
-            (then
-              (switch spec.restart_policy
-                (case "permanent"
-                  (update_restart_count child_id)
-                  (let (new_pid : number) (restart_child spec))
-                  (children.set spec.id new_pid))
-
-                (case "transient"
-                  (if (!= reason "normal")
-                    (then
-                      (update_restart_count child_id)
-                      (let (new_pid : number) (restart_child spec))
-                      (children.set spec.id new_pid))
-                    (else null)))
-
-                (case "temporary" null))))
-
-        ;; Introspection
-        ((array "which_children" from)
-          (send from children)))
-
+      (m/receive =&
+        ((array "exit" child_id reason)   (handle_exit child_id reason))
+        ((array "which_children" from)    (send from children)))
       (yield)))
   )
