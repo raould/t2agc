@@ -122,17 +122,20 @@
 
       (method handle_primitive ((task : any) (primitive : any)) (returns any)
         ; "Dispatch a yielded primitive; return the resume value for the next gen.next()."
-        (match primitive
-          ((object (type "yield"))
+        (switch (. primitive type)
+          (case "yield"
             undefined)
 
-          ((object (type "receive") (patterns patterns))
-            (this.handle_receive task patterns))
+          (case "receive"
+            (this.handle_receive task (. primitive patterns)))
 
-          ((object (type "effect") (capability cap) (operation op) (args args))
-            (this.handle_effect task cap op args))
+          (case "effect"
+            (this.handle_effect task
+              (. primitive capability)
+              (. primitive operation)
+              (. primitive args)))
 
-          (_
+          (default
             (this.crash_unknown_primitive task primitive))))
 
       (method crash_unknown_primitive ((task : any) (primitive : any)) (returns any)

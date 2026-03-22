@@ -16,7 +16,7 @@ All 16 source files compile cleanly with `npx t2tc --outDir /tmp/t2test`. Stages
 | Layer 1 — Capability | ✅ Done | `src/capability.t2` |
 | Layer 1 — match_pattern | ✅ Done | `src/match_pattern.t2` |
 | Layer 2 — Task | ✅ Done | `src/task.t2` |
-| Layer 3 — Scheduler | ✅ Done (⚠️ see note) | `src/scheduler.t2` |
+| Layer 3 — Scheduler | ✅ Done | `src/scheduler.t2` |
 | Layer 4 — Globals | ✅ Done | `src/runtime_globals.t2` |
 | Layer 4 — init_runtime | ✅ Done | `src/runtime_init.t2` |
 | Layer 4 — spawn | ✅ Done | `src/runtime_spawn.t2` |
@@ -27,7 +27,7 @@ All 16 source files compile cleanly with `npx t2tc --outDir /tmp/t2test`. Stages
 | Layer 5 — Macros | ✅ Done | `src/macros.t2m` |
 | Layer 6 — OTP | ✅ Done | `src/otp.t2` |
 
-> ⚠️ **Known bug — `scheduler.t2` `handle_primitive`**: uses `(match primitive ...)` which the t2lang compiler emits as a JS `match()` call that does not exist at runtime. Must be replaced with `(switch (. primitive type) (case "yield" ...) (case "receive" ...) ...)` before the scheduler can execute.
+> ✅ **`scheduler.t2` `handle_primitive`**: converted from `(match primitive ...)` to `(switch (. primitive type) ...)` — the scheduler can now execute correctly at runtime.
 
 ---
 
@@ -2286,26 +2286,7 @@ All OTP-level constructs emit appropriate AGC codes and integrate with the debug
 
 All 16 source files compile. Remaining work before the package is usable:
 
-### 1. Fix `scheduler.t2` `handle_primitive` (blocking — runtime correctness)
-
-`handle_primitive` currently uses `(match primitive ...)` which emits a JS `match()` call that does not exist. Replace with a `switch` on `primitive.type`:
-
-```t2
-(method handle_primitive ((task : any) (primitive : any)) (returns any)
-  (switch (. primitive type)
-    (case "yield"
-      undefined)
-    (case "receive"
-      (this.handle_receive task (. primitive patterns)))
-    (case "effect"
-      (this.handle_effect task (. primitive capability)
-                               (. primitive operation)
-                               (. primitive args)))
-    (default
-      (this.crash_unknown_primitive task primitive))))
-```
-
-### 2. Wire exports and imports across all source files
+### 1. Wire exports and imports across all source files
 
 No file currently has `(export ...)` or `(import ...)` declarations. Each module needs to export its public API and import its dependencies. Rough dependency graph:
 
@@ -2326,11 +2307,11 @@ No file currently has `(export ...)` or `(import ...)` declarations. Each module
 - `runtime_effect.t2` → export `effect`
 - `otp.t2` → export `restart_child`, `registry_fn`, `supervisor_fn`
 
-### 3. Update `package.json`
+### 2. Update `package.json`
 
 Add `main`, `types`, and `exports` fields pointing to the compiled output in `dist/`.
 
-### 4. Write tests
+### 3. Write tests
 
 Vitest unit tests covering:
 - `ring_buffer`: push/to_array overflow and wrap-around
