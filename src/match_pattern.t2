@@ -76,4 +76,6 @@
       (set! i (+ i 1)))
     (return result)
   )
+
+  (export-named (try_match_patterns) (match_pattern) (compute_match_result))
 )

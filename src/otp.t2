@@ -119,4 +119,6 @@
         ((array "exit" child_id reason)   (handle_exit child_id reason))
         ((array "which_children" from)    (send from children)))
       (yield)))
+
+  (export-named (restart_child) (registry_fn) (supervisor_fn))
   )

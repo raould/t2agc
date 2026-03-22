@@ -3,6 +3,9 @@
   ;; Depends on: Priority, TaskStatus, MailboxOverflowPolicy (types.t2),
   ;;             RingBuffer (ring_buffer.t2), Capability (capability.t2)
 
+  (import (object (named (array (object (name "RingBuffer"))))) "./ring_buffer")
+  (import (object (named (array (object (name "Capability"))))) "./capability")
+
   (class Task
     (class-body
       ;; Fields not set via constructor shorthand (have defaults or are computed)
@@ -69,4 +72,6 @@
       (method configure_mailbox ((max_size : number) (overflow_policy : MailboxOverflowPolicy)) (returns void)
         (set! this.mailbox_max              max_size)
         (set! this.mailbox_overflow_policy  overflow_policy))))
+
+  (export-named (Task))
 )

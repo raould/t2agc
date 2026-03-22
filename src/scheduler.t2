@@ -17,6 +17,11 @@
   ;; For the async wake-up path (send -> schedule), send() sets
   ;; task.pending_resume so that the next execute_slice picks it up.
 
+  (import (object (named (array (object (name "Task"))))) "./task")
+  (import (object (named (array (object (name "AGCEvent"))))) "./agc_event")
+  (import (object (named (array (object (name "RingBuffer"))))) "./ring_buffer")
+  (import (object (named (array (object (name "match_pattern")) (object (name "compute_match_result"))))) "./match_pattern")
+
   (class Scheduler
     (class-body
       (field (run_queues                      : any))
@@ -443,6 +448,7 @@
         (console.error (+ "[" code "] " message))
 
         (if this.monitoring_callback
-          (then (this.monitoring_callback.call null event))))))))  ;; class-body, class
+          (then (this.monitoring_callback.call null event))))))  ;; class-body, class
 
+  (export-named (Scheduler))
 )

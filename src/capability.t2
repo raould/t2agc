@@ -35,4 +35,6 @@
   (fn make_random_capability () : Capability
     ;; Random number generation capability.
     (return (new Capability "random" (array "next" "next_int" "next_float") (object))))
+
+  (export-named (Capability) (make_log_capability) (make_io_capability) (make_timer_capability) (make_random_capability))
 )
