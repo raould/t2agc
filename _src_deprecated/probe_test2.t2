@@ -1,5 +1,0 @@
-(program
-  ;; Try without a namespace prefix — just bare macro-import
-  (macro-import "" "./probe_minimal.t2m")
-  (let (r) (hello 5))
-)

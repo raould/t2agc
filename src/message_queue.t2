@@ -1,23 +1,34 @@
 (program
-  (import { AGCEvent } "./types")
   (import { RingBuffer } "./ring_buffer")
   (export (class MessageQueue
     (class-body
-      (field (buffer : (type-app RingBuffer AGCEvent)))
+      (field (buffer : (type-app RingBuffer any)))
+      (field (dropped_count : number))
+      (field (on_overflow : any))
       (constructor ((capacity : number))
         (set! (. this buffer) (new RingBuffer capacity))
+        (set! (. this dropped_count) 0)
+        (set! (. this on_overflow) null)
       )
-      
-      (method enqueue ((event : AGCEvent)) (returns void)
+
+      (method enqueue ((event : any)) (returns boolean)
         (if (method-call (. this buffer) "is_full")
             (then
-              (method-call (. this buffer) "pop")
+              (let (dropped) (method-call (. this buffer) "pop"))
+              (set! (. this dropped_count) (+ (. this dropped_count) 1))
+              ;; Notify via callback if registered (used for AGC-M010 diagnostics)
+              (if (!== (. this on_overflow) null)
+                (then (method-call this "on_overflow" dropped))
+              )
+              (method-call (. this buffer) "push" event)
+              (return true) ;; true = overflow occurred, oldest message was dropped
             )
         )
         (method-call (. this buffer) "push" event)
+        (return false) ;; false = no overflow
       )
 
-      (method dequeue () (returns (union AGCEvent undefined))
+      (method dequeue () (returns (union any undefined))
         (return (method-call (. this buffer) "pop"))
       )
 

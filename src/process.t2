@@ -14,10 +14,10 @@
       (field (status : ProcessStatus))
       (field (coroutine : any))
 
-      (constructor ((pid : Pid) (task_ : any))
+      (constructor ((pid : Pid) (task_ : any) (mailbox_limit : any))
         (set! (. this pid) pid)
         (set! (. this task_) task_)
-        (set! (. this mailbox) (new MessageQueue 100))
+        (set! (. this mailbox) (new MessageQueue (|| mailbox_limit 100)))
         (set! (. this status) "runnable")
         (set! (. this coroutine) undefined)
       )

@@ -1,10 +1,6 @@
 (program
-  (import { Process } "./process")
   (import { Pid } "./types")
-  (import { Task } "./task")
   (import { Scheduler } "./scheduler")
-  (import { AGCEvent } "./types")
-  (import { ReceiveResult CapabilitySpec } "./types")
 
   (import { OTP } "./otp")
 
@@ -21,15 +17,15 @@
     (return (. global_otp scheduler))
   ))
 
-  (export (fn spawn ((fn_ : any) (args : (type-array any)) (priority : string) (caps : any)) : Pid
+  (export (fn spawn ((fn_ : any) (args : (type-array any)) (priority : string) (caps : any) (mailbox_limit : any)) : Pid
     (if (=== global_otp undefined)
       (then (return -1))
     )
-    (let (execute_fn) (lambda () 
+    (let (execute_fn) (lambda ()
          (return (method-call fn_ "apply" null args))
     ))
-    (let (task : any) (object (execute execute_fn) (id 0) (priority priority) (status "idle")))
-    (return (method-call global_otp "spawn" task))
+    (let (task : any) (object (execute execute_fn) (id 0) (priority priority) (status "runnable")))
+    (return (method-call global_otp "spawn" task mailbox_limit))
   ))
 
   (export (fn self () : (union Pid undefined)

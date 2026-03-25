@@ -55,34 +55,47 @@
 
         (let (res : any) undefined)
 
-        (if (=== (. process coroutine) undefined)
-          (then
-             (let (fn_) (. (. process task_) execute))
-             (set! (. process coroutine) (fn_)) ;; initialize generator
-             (set! res (method-call (. process coroutine) "next")) ;; run to first yield
+        (try
+          (if (=== (. process coroutine) undefined)
+            (then
+               (let (fn_) (. (. process task_) execute))
+               (set! (. process coroutine) (fn_)) ;; initialize generator
+               (set! res (method-call (. process coroutine) "next")) ;; run to first yield
+            )
           )
-        )
 
-        (if (=== res undefined)
-          (then
-            ;; we need an event to continue
-            (let (event) (method-call process "receive"))
-            ;; wait, if mailbox is empty and process expects receive, it should suspend!
-            ;; if event is undefined, we shouldn't resume the coroutine unless it's a message
-            ;; wait... in a real actor loop, if not suspended, we run it?
-            (if (!== event undefined)
-              (then
-                (set! res (method-call (. process coroutine) "next" event))
-              )
-              (else
-                (set! res (object (done false))) ;; mock a suspended state
+          (if (=== res undefined)
+            (then
+              ;; coroutine already initialized — try to deliver next message
+              (let (event) (method-call process "receive"))
+              (if (!== event undefined)
+                (then
+                  (set! res (method-call (. process coroutine) "next" event))
+                )
+                (else
+                  ;; mailbox empty — suspend, do NOT re-add to run queue.
+                  ;; Process.send() will set status back to "runnable" and
+                  ;; OTP.send() will re-schedule when a message arrives.
+                  (set! (. process status) "suspended")
+                  (method-call (. this context) "clear_current")
+                  (return true)
+                )
               )
             )
+          )
+
+          (catch crash_reason
+            ;; Actor threw an exception — mark as crashed, do not propagate.
+            (set! (. process status) "dead")
+            (set! (. (. process task_) status) "crashed")
+            (set! (. (. process task_) crash_reason) crash_reason)
+            (method-call (. this context) "clear_current")
+            (return true)
           )
         )
 
         (method-call (. this context) "clear_current")
-        
+
         (if (. res done)
           (then
             (set! (. process status) "dead")
@@ -90,8 +103,15 @@
           )
           (else
             (set! (. process status) "suspended")
-            ;; if event was undefined, we don't push it back to run_queue because it is waiting
-            ;; wait, my 'send' wakes it up! So we don't push it if it's waiting for receive and event was undefined.
+            ;; Process yielded — check if mailbox already has messages.
+            ;; If so, re-add to run queue immediately (handles pre-seeded messages).
+            ;; Otherwise, OTP.send() will re-schedule when a message arrives.
+            (if (! (method-call (. process mailbox) "is_empty"))
+              (then
+                (set! (. process status) "runnable")
+                (method-call this "schedule" process)
+              )
+            )
           )
         )
 

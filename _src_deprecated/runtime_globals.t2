@@ -1,7 +1,0 @@
-(program
-;; Layer 4 — Global scheduler accessor.
-;; Depends on: Scheduler (scheduler.t2)
-
-(export (fn get_global_scheduler () : Scheduler
-  (return globalThis.__t2agc__.scheduler)))
-)
