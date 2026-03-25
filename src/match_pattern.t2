@@ -1,0 +1,48 @@
+(program
+  (import { IPattern IPatternArg IBindSlot ILiteralSlot IWildcardSlot } "./types")
+
+  (export-named (pat_bind) (lit) (wildcard_) (match_pattern))
+
+  ;; Helper factories for pattern arg slots
+  (fn pat_bind ((name : string)) : IBindSlot
+    (return (object (kind "bind") (name name))))
+
+  (fn lit ((value : any)) : ILiteralSlot
+    (return (object (kind "literal") (value value))))
+
+  (let (wildcard_ : IWildcardSlot) (object (kind "wildcard")))
+
+  ;; matchPattern: try to match a single IPattern against a Message (tagged array).
+  ;; Returns pat_bindings object on success, or null on failure.
+  (fn match_pattern ((pattern : IPattern) (msg : (type-array any))) : any
+    ;; 1. Tag must match
+    (if (!== (index msg 0) (. pattern op))
+      (then (return null)))
+
+    ;; 2. Arity must match: msg has tag + args, pattern.args is just args
+    (if (!== (- (. msg length) 1) (. (. pattern args) length))
+      (then (return null)))
+
+    ;; 3. Walk each arg slot
+    (let (pat_bindings : any) (object))
+    (let (i) 0)
+    (while (< i (. (. pattern args) length))
+      (let (slot : IPatternArg) (index (. pattern args) i))
+      (let (val) (index msg (+ i 1)))
+
+      (if (=== (. slot kind) "literal")
+        (then
+          (if (!== val (. slot value))
+            (then (return null)))))
+
+      (if (=== (. slot kind) "bind")
+        (then
+          (set! (index pat_bindings (. slot name)) val)))
+
+      ;; "wildcard" — accept, no capture
+
+      (set! i (+ i 1))
+    )
+
+    (return pat_bindings))
+)

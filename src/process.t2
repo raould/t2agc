@@ -13,6 +13,7 @@
       (field (mailbox : MessageQueue))
       (field (status : ProcessStatus))
       (field (coroutine : any))
+      (field (pending_receive : any))
 
       (constructor ((pid : Pid) (task_ : any) (mailbox_limit : any))
         (set! (. this pid) pid)
@@ -20,6 +21,7 @@
         (set! (. this mailbox) (new MessageQueue (|| mailbox_limit 100)))
         (set! (. this status) "runnable")
         (set! (. this coroutine) undefined)
+        (set! (. this pending_receive) null)
       )
 
       (method send ((event : any)) (returns void)

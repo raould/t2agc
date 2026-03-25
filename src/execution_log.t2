@@ -1,0 +1,56 @@
+(program
+  (import { RingBuffer } "./ring_buffer")
+  (import { AGCEvent } "./types")
+
+  ;; A bounded execution log that records runtime events (spawn, send, receive, crash, done).
+  ;; Uses a RingBuffer so old events are evicted when the log is full.
+  (export (class ExecutionLog
+    (class-body
+      (field (events : (type-app RingBuffer any)))
+      (field (agc_events : (type-app RingBuffer AGCEvent)))
+
+      (constructor ((capacity : number))
+        (set! (. this events) (new RingBuffer capacity))
+        (set! (. this agc_events) (new RingBuffer capacity))
+      )
+
+      (method log ((event : any)) (returns void)
+        (method-call (. this events) "push" event)
+      )
+
+      (method log_agc ((event : AGCEvent)) (returns void)
+        (method-call (. this agc_events) "push" event)
+      )
+
+      (method get_events () (returns (type-array any))
+        ;; Drain into array (oldest first)
+        (let (result : (type-array any)) (array))
+        (let (size) (method-call (. this events) "size"))
+        (let (i) 0)
+        ;; Peek by copying internal state — use buffer directly
+        (while (< i size)
+          (let (idx) (% (+ (. (. this events) head) i) (. (. this events) capacity)))
+          (method-call result "push" (index (. (. this events) buffer) idx))
+          (set! i (+ i 1))
+        )
+        (return result)
+      )
+
+      (method get_agc_events () (returns (type-array AGCEvent))
+        (let (result : (type-array AGCEvent)) (array))
+        (let (size) (method-call (. this agc_events) "size"))
+        (let (i) 0)
+        (while (< i size)
+          (let (idx) (% (+ (. (. this agc_events) head) i) (. (. this agc_events) capacity)))
+          (method-call result "push" (index (. (. this agc_events) buffer) idx))
+          (set! i (+ i 1))
+        )
+        (return result)
+      )
+
+      (method size () (returns number)
+        (return (method-call (. this events) "size"))
+      )
+    )
+  ))
+)

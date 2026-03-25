@@ -2,6 +2,7 @@
   (import { ProcessRegistry } "./process_registry")
   (import { ExecutionContext } "./execution_context")
   (import { Process } "./process")
+  (import { match_pattern } "./match_pattern")
 
   (fn prio_val ((p : string)) : number
     (if (=== p "critical") (then (return 0)))
@@ -9,6 +10,55 @@
     (if (=== p "normal") (then (return 2)))
     (if (=== p "low") (then (return 3)))
     (return 4)
+  )
+
+  ;; Try to find a message in the process's mailbox that matches its pending patterns.
+  ;; Returns a ReceiveResult on success, or undefined if no match found.
+  (fn try_match_mailbox ((process : Process)) : any
+    (let (patterns) (. process pending_receive))
+
+    ;; patterns=null → legacy wildcard receive, return raw message
+    (if (|| (=== patterns null) (=== patterns undefined))
+      (then
+        (let (msg) (method-call process "receive"))
+        (return msg) ;; raw message or undefined
+      )
+    )
+
+    ;; patterns=[] (empty array) → wildcard receive, return ReceiveResult
+    (if (&& (method-call Array "isArray" patterns) (=== (. patterns length) 0))
+      (then
+        (let (msg) (method-call process "receive"))
+        (if (=== msg undefined)
+          (then (return undefined)))
+        (return (object (index_ 0) (message msg) (bindings (object))))
+      )
+    )
+
+    ;; Selective receive: scan mailbox for a message matching any pattern
+    (let (match_result) undefined)
+    (let (match_index) -1)
+    (let (found_msg) (method-call (. process mailbox) "scan_remove"
+      (lambda ((msg : any))
+        ;; Try each pattern in order
+        (let (pi) 0)
+        (while (< pi (. patterns length))
+          (let (result) (match_pattern (index patterns pi) msg))
+          (if (!== result null)
+            (then
+              (set! match_result result)
+              (set! match_index pi)
+              (return true)))
+          (set! pi (+ pi 1))
+        )
+        (return false)
+      )
+    ))
+
+    (if (=== found_msg undefined)
+      (then (return undefined)))
+
+    (return (object (index_ match_index) (message found_msg) (bindings match_result)))
   )
 
   (export (class Scheduler
@@ -66,16 +116,16 @@
 
           (if (=== res undefined)
             (then
-              ;; coroutine already initialized — try to deliver next message
-              (let (event) (method-call process "receive"))
-              (if (!== event undefined)
+              ;; coroutine already initialized — try to deliver a matching message
+              (let (deliver) (try_match_mailbox process))
+              (if (!== deliver undefined)
                 (then
-                  (set! res (method-call (. process coroutine) "next" event))
+                  ;; Clear pending_receive since we're about to deliver
+                  (set! (. process pending_receive) null)
+                  (set! res (method-call (. process coroutine) "next" deliver))
                 )
                 (else
-                  ;; mailbox empty — suspend, do NOT re-add to run queue.
-                  ;; Process.send() will set status back to "runnable" and
-                  ;; OTP.send() will re-schedule when a message arrives.
+                  ;; No matching message — suspend.
                   (set! (. process status) "suspended")
                   (method-call (. this context) "clear_current")
                   (return true)
@@ -102,10 +152,14 @@
             (set! (. (. process task_) status) "done")
           )
           (else
+            ;; Process yielded a primitive — capture pending_receive patterns
+            (if (&& (. res value) (=== (. (. res value) type) "receive"))
+              (then
+                (set! (. process pending_receive) (. (. res value) patterns))
+              )
+            )
             (set! (. process status) "suspended")
-            ;; Process yielded — check if mailbox already has messages.
-            ;; If so, re-add to run queue immediately (handles pre-seeded messages).
-            ;; Otherwise, OTP.send() will re-schedule when a message arrives.
+            ;; Check if mailbox already has a matching message
             (if (! (method-call (. process mailbox) "is_empty"))
               (then
                 (set! (. process status) "runnable")

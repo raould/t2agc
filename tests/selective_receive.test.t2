@@ -1,0 +1,113 @@
+(program
+  (import { describe it } "vitest")
+  (import { asrt asrtDeep } "./asrt")
+  (import { init_runtime run spawn send } "./runtime")
+  (import { pat_bind lit wildcard_ } "./match_pattern")
+
+  (describe "Selective Receive"
+    (lambda ()
+
+      (it "matches a specific pattern and returns ReceiveResult" (lambda ()
+        (init_runtime)
+        (let (box) (object (tag null) (name null)))
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (result) (yield (object (type "receive") (patterns
+              (array
+                (object (op "register") (args (array (pat_bind "name") (pat_bind "pid_val"))))
+                (object (op "ping") (args (array)))
+              )))))
+            (set! (. box tag) (. result index_))
+            (set! (. box name) (. (. result bindings) name)))
+          (array) "normal" (new Set)))
+        (send pid (array "register" "alice" 42))
+        (run)
+        (asrt (. box tag) 0)
+        (asrt (. box name) "alice")))
+
+      (it "selects second pattern when first doesn't match" (lambda ()
+        (init_runtime)
+        (let (box) (object (idx null) (val null)))
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (result) (yield (object (type "receive") (patterns
+              (array
+                (object (op "foo") (args (array (pat_bind "x"))))
+                (object (op "bar") (args (array (pat_bind "y"))))
+              )))))
+            (set! (. box idx) (. result index_))
+            (set! (. box val) (. (. result bindings) y)))
+          (array) "normal" (new Set)))
+        (send pid (array "bar" 99))
+        (run)
+        (asrt (. box idx) 1)
+        (asrt (. box val) 99)))
+
+      (it "skips non-matching messages (selective receive)" (lambda ()
+        (init_runtime)
+        (let (box) (object (matched null) (leftover null)))
+        (let (pid) (spawn
+          (generator-fn ()
+            ;; First receive: only accept "important" messages
+            (let (result) (yield (object (type "receive") (patterns
+              (array
+                (object (op "important") (args (array (pat_bind "data"))))
+              )))))
+            (set! (. box matched) (. (. result bindings) data))
+            ;; Second receive: accept anything (null = raw message)
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (set! (. box leftover) (index msg 0)))
+          (array) "normal" (new Set)))
+        ;; Send "noise" first, then "important" — selective receive should skip noise
+        (send pid (array "noise" "ignored"))
+        (send pid (array "important" "critical-data"))
+        (run)
+        (asrt (. box matched) "critical-data")
+        (asrt (. box leftover) "noise")))
+
+      (it "literal slot rejects mismatched values" (lambda ()
+        (init_runtime)
+        (let (box) (object (val null)))
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (result) (yield (object (type "receive") (patterns
+              (array
+                (object (op "event") (args (array (lit "click") (pat_bind "x"))))
+              )))))
+            (set! (. box val) (. (. result bindings) x)))
+          (array) "normal" (new Set)))
+        ;; Send non-matching first, then matching
+        (send pid (array "event" "keydown" 10))
+        (send pid (array "event" "click" 42))
+        (run)
+        (asrt (. box val) 42)))
+
+      (it "wildcard slot matches any value without capture" (lambda ()
+        (init_runtime)
+        (let (box) (object (msg_val null)))
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (result) (yield (object (type "receive") (patterns
+              (array
+                (object (op "log") (args (array wildcard_ (pat_bind "msg"))))
+              )))))
+            (set! (. box msg_val) (. (. result bindings) msg)))
+          (array) "normal" (new Set)))
+        (send pid (array "log" "INFO" "hello world"))
+        (run)
+        (asrt (. box msg_val) "hello world")))
+
+      (it "empty patterns array returns ReceiveResult with raw message" (lambda ()
+        (init_runtime)
+        (let (box) (object (idx null) (msg null)))
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (result) (yield (object (type "receive") (patterns (array)))))
+            (set! (. box idx) (. result index_))
+            (set! (. box msg) (. result message)))
+          (array) "normal" (new Set)))
+        (send pid (array "anything" 1 2 3))
+        (run)
+        (asrt (. box idx) 0)
+        (asrtDeep (. box msg) (array "anything" 1 2 3))))))
+)
