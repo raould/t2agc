@@ -69,6 +69,7 @@
       (field (running : boolean))
       (field (tasks : any))
       (field (log : any))
+      (field (next_monitor_ref : number))
 
       (constructor ((registry : ProcessRegistry) (context : ExecutionContext))
         (set! (. this registry) registry)
@@ -77,6 +78,7 @@
         (set! (. this running) false)
         (set! (. this tasks) (new Map))
         (set! (. this log) null)
+        (set! (. this next_monitor_ref) 1)
       )
 
       (method schedule ((process : Process)) (returns void)
@@ -96,12 +98,87 @@
         (set! (. this running) false)
       )
 
+      ;; Deliver a message to a process, rescheduling it if it was suspended.
+      (method deliver_message ((process : Process) (msg : any)) (returns void)
+        (let (was_suspended) (=== (. process status) "suspended"))
+        (method-call process "send" msg)
+        (if was_suspended
+          (then (method-call this "schedule" process))
+        )
+      )
+
+      ;; Propagate exit signals from a dying process to all linked processes and monitors.
+      ;; Called after a process is marked "dead" (crash or normal done).
+      (method propagate_exit ((dying : Process) (reason : any)) (returns void)
+        ;; Notify all linked processes
+        (for-of linked_pid (. dying links)
+          (let (linked) (method-call (. this registry) "get" linked_pid))
+          (if (&& (!== linked undefined) (!== (. linked status) "dead"))
+            (then
+              ;; Remove reciprocal link to prevent re-notification if linked also dies
+              (method-call (. linked links) "delete" (. dying pid))
+              (if (. linked trap_exit)
+                (then
+                  ;; Convert signal to a mailbox message: ["EXIT", from_pid, reason]
+                  (method-call this "deliver_message" linked (array "EXIT" (. dying pid) reason))
+                  (if (!== (. this log) null)
+                    (then
+                      (method-call (. this log) "log" (object
+                        (kind "exit_signal") (from_pid (. dying pid)) (to_pid (. linked pid))
+                        (reason reason) (action "trapped") (time (method-call Date "now"))))
+                      (method-call (. this log) "log_agc" (object
+                        (code "AGC-X002") (severity "warn")
+                        (timestamp (method-call Date "now"))
+                        (pid (. dying pid))
+                        (detail (+ "Trapped by " (+ "" (. linked pid))))))))
+                )
+                (else
+                  ;; Kill the linked process immediately
+                  (set! (. linked status) "dead")
+                  (set! (. (. linked task_) status) "crashed")
+                  (set! (. (. linked task_) crash_reason) reason)
+                  (if (!== (. this log) null)
+                    (then
+                      (method-call (. this log) "log" (object
+                        (kind "exit_signal") (from_pid (. dying pid)) (to_pid (. linked pid))
+                        (reason reason) (action "killed") (time (method-call Date "now"))))
+                      (method-call (. this log) "log_agc" (object
+                        (code "AGC-X001") (severity "error")
+                        (timestamp (method-call Date "now"))
+                        (pid (. dying pid))
+                        (detail (+ "Killed " (+ "" (. linked pid))))))))
+                  ;; Recursively propagate from the newly-killed process
+                  (method-call this "propagate_exit" linked reason)
+                )
+              )
+            )
+          )
+        )
+
+        ;; Deliver DOWN messages to all watchers (monitors)
+        (for-of entry (. dying monitors_by)
+          (let (watcher) (method-call (. this registry) "get" (. entry watcher_pid)))
+          (if (&& (!== watcher undefined) (!== (. watcher status) "dead"))
+            (then
+              (method-call this "deliver_message" watcher
+                (array "DOWN" (. entry ref) (. dying pid) reason))
+            )
+          )
+        )
+      )
+
       (method run_next () (returns boolean)
         (if (=== (. (. this run_queue) length) 0)
           (then (return false))
         )
 
         (let (process : Process) (method-call (. this run_queue) "shift"))
+
+        ;; Skip processes killed by exit signal propagation while in the run queue
+        (if (=== (. process status) "dead")
+          (then (return true))
+        )
+
         (set! (. process status) "running")
         (method-call (. this context) "set_current" process)
 
@@ -118,30 +195,37 @@
 
           (if (=== res undefined)
             (then
-              ;; coroutine already initialized — try to deliver a matching message
-              (let (deliver) (try_match_mailbox process))
-              (if (!== deliver undefined)
+              ;; Check for a pending yield result (result from a previously processed primitive)
+              (if (!== (. process pending_yield_result) undefined)
                 (then
-                  ;; Clear pending_receive since we're about to deliver
-                  (set! (. process pending_receive) null)
-                  (set! res (method-call (. process coroutine) "next" deliver))
+                  (let (yield_result) (. process pending_yield_result))
+                  (set! (. process pending_yield_result) undefined)
+                  (set! res (method-call (. process coroutine) "next" yield_result))
                 )
                 (else
-                  ;; No matching message — suspend.
-                  (set! (. process status) "suspended")
-                  (method-call (. this context) "clear_current")
-                  (return true)
+                  ;; Try to deliver a matching message from the mailbox
+                  (let (deliver) (try_match_mailbox process))
+                  (if (!== deliver undefined)
+                    (then
+                      (set! (. process pending_receive) null)
+                      (set! res (method-call (. process coroutine) "next" deliver))
+                    )
+                    (else
+                      ;; No matching message — suspend until one arrives
+                      (set! (. process status) "suspended")
+                      (method-call (. this context) "clear_current")
+                      (return true)
+                    )
+                  )
                 )
               )
             )
           )
 
           (catch crash_reason
-            ;; Actor threw an exception — mark as crashed, do not propagate.
             (set! (. process status) "dead")
             (set! (. (. process task_) status) "crashed")
             (set! (. (. process task_) crash_reason) crash_reason)
-            ;; Log crash event
             (if (!== (. this log) null)
               (then
                 (method-call (. this log) "log" (object
@@ -152,6 +236,7 @@
                   (timestamp (method-call Date "now"))
                   (pid (. process pid))
                   (detail (+ "Process crashed: " (+ "" crash_reason)))))))
+            (method-call this "propagate_exit" process crash_reason)
             (method-call (. this context) "clear_current")
             (return true)
           )
@@ -163,24 +248,142 @@
           (then
             (set! (. process status) "dead")
             (set! (. (. process task_) status) "done")
-            ;; Log done event
             (if (!== (. this log) null)
               (then
                 (method-call (. this log) "log" (object
                   (kind "done") (pid (. process pid))
                   (time (method-call Date "now"))))))
+            (method-call this "propagate_exit" process "normal")
           )
           (else
-            ;; Process yielded a primitive — capture pending_receive patterns
-            (if (&& (. res value) (=== (. (. res value) type) "receive"))
+            (let (prim) (. res value))
+            ;; Default: suspend. Individual handlers below override this to "runnable" + reschedule.
+            (set! (. process status) "suspended")
+
+            ;; receive — wait for a matching mailbox message
+            (if (&& prim (=== (. prim type) "receive"))
               (then
-                (set! (. process pending_receive) (. (. res value) patterns))
+                (set! (. process pending_receive) (. prim patterns))
+                (if (! (method-call (. process mailbox) "is_empty"))
+                  (then
+                    (set! (. process status) "runnable")
+                    (method-call this "schedule" process)
+                  )
+                )
               )
             )
-            (set! (. process status) "suspended")
-            ;; Check if mailbox already has a matching message
-            (if (! (method-call (. process mailbox) "is_empty"))
+
+            ;; link — establish a bidirectional link with another process
+            (if (&& prim (=== (. prim type) "link"))
               (then
+                (let (target_pid) (. prim target))
+                (let (target) (method-call (. this registry) "get" target_pid))
+                (if (|| (=== target undefined) (=== (. target status) "dead"))
+                  (then
+                    (if (!== (. this log) null)
+                      (then
+                        (method-call (. this log) "log_agc" (object
+                          (code "AGC-L010") (severity "warn")
+                          (timestamp (method-call Date "now"))
+                          (pid (. process pid))
+                          (detail (+ "Link to dead pid=" (+ "" target_pid)))))))
+                    (set! (. process pending_yield_result) false)
+                  )
+                  (else
+                    (method-call (. process links) "add" target_pid)
+                    (method-call (. target links) "add" (. process pid))
+                    (if (!== (. this log) null)
+                      (then
+                        (method-call (. this log) "log" (object
+                          (kind "link") (pid_a (. process pid)) (pid_b target_pid)
+                          (time (method-call Date "now"))))
+                        (method-call (. this log) "log_agc" (object
+                          (code "AGC-L001") (severity "warn")
+                          (timestamp (method-call Date "now"))
+                          (pid (. process pid))
+                          (detail (+ "Link with " (+ "" target_pid)))))))
+                    (set! (. process pending_yield_result) true)
+                  )
+                )
+                (set! (. process status) "runnable")
+                (method-call this "schedule" process)
+              )
+            )
+
+            ;; monitor — watch another process; yield returns the monitor ref
+            (if (&& prim (=== (. prim type) "monitor"))
+              (then
+                (let (target_pid) (. prim target))
+                (let (target) (method-call (. this registry) "get" target_pid))
+                (let (ref) (. this next_monitor_ref))
+                (set! (. this next_monitor_ref) (+ (. this next_monitor_ref) 1))
+                (if (&& (!== target undefined) (!== (. target status) "dead"))
+                  (then
+                    (method-call (. target monitors_by) "push"
+                      (object (ref ref) (watcher_pid (. process pid))))
+                    (method-call (. process monitors) "set" ref target_pid)
+                    (if (!== (. this log) null)
+                      (then
+                        (method-call (. this log) "log" (object
+                          (kind "monitor") (watcher_pid (. process pid)) (target_pid target_pid)
+                          (ref ref) (time (method-call Date "now"))))
+                        (method-call (. this log) "log_agc" (object
+                          (code "AGC-M001") (severity "warn")
+                          (timestamp (method-call Date "now"))
+                          (pid (. process pid))
+                          (detail (+ "Monitor ref=" (+ "" ref)))))))
+                  )
+                  (else
+                    ;; Target already dead — immediately deliver a DOWN message
+                    (method-call this "deliver_message" process
+                      (array "DOWN" ref target_pid "noproc"))
+                  )
+                )
+                (set! (. process pending_yield_result) ref)
+                (set! (. process status) "runnable")
+                (method-call this "schedule" process)
+              )
+            )
+
+            ;; cancel_monitor — stop watching a process by ref
+            (if (&& prim (=== (. prim type) "cancel_monitor"))
+              (then
+                (let (ref) (. prim ref))
+                (let (target_pid) (method-call (. process monitors) "get" ref))
+                (if (!== target_pid undefined)
+                  (then
+                    (method-call (. process monitors) "delete" ref)
+                    (let (target) (method-call (. this registry) "get" target_pid))
+                    (if (!== target undefined)
+                      (then
+                        (set! (. target monitors_by)
+                          (method-call (. target monitors_by) "filter"
+                            (lambda ((e : any)) (!== (. e ref) ref))))
+                      )
+                    )
+                    (if (!== (. this log) null)
+                      (then
+                        (method-call (. this log) "log" (object
+                          (kind "cancel_monitor") (watcher_pid (. process pid)) (ref ref)
+                          (time (method-call Date "now"))))
+                        (method-call (. this log) "log_agc" (object
+                          (code "AGC-M002") (severity "warn")
+                          (timestamp (method-call Date "now"))
+                          (pid (. process pid))
+                          (detail (+ "Cancel ref=" (+ "" ref)))))))
+                  )
+                )
+                (set! (. process pending_yield_result) true)
+                (set! (. process status) "runnable")
+                (method-call this "schedule" process)
+              )
+            )
+
+            ;; trap_exit — set whether exit signals are converted to messages
+            (if (&& prim (=== (. prim type) "trap_exit"))
+              (then
+                (set! (. process trap_exit) (. prim value))
+                (set! (. process pending_yield_result) true)
                 (set! (. process status) "runnable")
                 (method-call this "schedule" process)
               )

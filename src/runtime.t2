@@ -59,6 +59,28 @@
           (run_queue_length (. (. (. global_otp scheduler) run_queue) length))
         ))
       ))
+
+      (listLinks (lambda ((pid : Pid))
+        (if (=== global_otp undefined) (then (return (array))))
+        (let (proc) (method-call (. global_otp registry) "get" pid))
+        (if (=== proc undefined) (then (return (array))))
+        (let (result : (type-array any)) (array))
+        (for-of linked_pid (. proc links)
+          (method-call result "push" linked_pid)
+        )
+        (return result)
+      ))
+
+      (listMonitors (lambda ((pid : Pid))
+        (if (=== global_otp undefined) (then (return (array))))
+        (let (proc) (method-call (. global_otp registry) "get" pid))
+        (if (=== proc undefined) (then (return (array))))
+        (let (result : (type-array any)) (array))
+        (for-of entry (. proc monitors_by)
+          (method-call result "push" entry)
+        )
+        (return result)
+      ))
     ))
   ))
 
@@ -105,5 +127,20 @@
     (while (method-call global_otp "step")
       (let (ignore) 1)
     )
+  ))
+
+  (export (fn link ((pid_a : Pid) (pid_b : Pid)) : boolean
+    (if (=== global_otp undefined) (then (return false)))
+    (return (method-call global_otp "link" pid_a pid_b))
+  ))
+
+  (export (fn monitor ((watcher_pid : Pid) (target_pid : Pid)) : any
+    (if (=== global_otp undefined) (then (return undefined)))
+    (return (method-call global_otp "monitor" watcher_pid target_pid))
+  ))
+
+  (export (fn cancel_monitor ((watcher_pid : Pid) (ref : number)) : boolean
+    (if (=== global_otp undefined) (then (return false)))
+    (return (method-call global_otp "cancel_monitor" watcher_pid ref))
   ))
 )

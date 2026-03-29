@@ -69,4 +69,24 @@
       (type_ (tlit "exit"))
       (reason any)))
 
-  (export-named (Pid) (Priority) (TaskStatus) (Message) (AGCEvent) (CapabilitySpec) (IBindSlot) (ILiteralSlot) (IWildcardSlot) (IPatternArg) (IPattern) (ReceivePrimitive) (ReceiveResult) (SpawnPrimitive) (SendPrimitive) (ExitPrimitive)))
+  (interface LinkPrimitive
+    (LinkPrimitive
+      (type_ (tlit "link"))
+      (target Pid)))
+
+  (interface MonitorPrimitive
+    (MonitorPrimitive
+      (type_ (tlit "monitor"))
+      (target Pid)))
+
+  (interface CancelMonitorPrimitive
+    (CancelMonitorPrimitive
+      (type_ (tlit "cancel_monitor"))
+      (ref number)))
+
+  (interface TrapExitPrimitive
+    (TrapExitPrimitive
+      (type_ (tlit "trap_exit"))
+      (value boolean)))
+
+  (export-named (Pid) (Priority) (TaskStatus) (Message) (AGCEvent) (CapabilitySpec) (IBindSlot) (ILiteralSlot) (IWildcardSlot) (IPatternArg) (IPattern) (ReceivePrimitive) (ReceiveResult) (SpawnPrimitive) (SendPrimitive) (ExitPrimitive) (LinkPrimitive) (MonitorPrimitive) (CancelMonitorPrimitive) (TrapExitPrimitive)))

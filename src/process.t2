@@ -5,7 +5,7 @@
   (import { AGCEvent } "./types")
 
   (export (type ProcessStatus (union (tlit "runnable") (tlit "running") (tlit "suspended") (tlit "dead"))))
-  
+
   (export (class Process
     (class-body
       (field (pid : Pid))
@@ -14,6 +14,11 @@
       (field (status : ProcessStatus))
       (field (coroutine : any))
       (field (pending_receive : any))
+      (field (pending_yield_result : any))  ;; result to pass on next coroutine.next() call
+      (field (links : any))                 ;; Set<Pid> — bidirectional links
+      (field (monitors_by : (type-array any))) ;; [{ref, watcher_pid}] — who is watching this process
+      (field (monitors : any))              ;; Map<ref, target_pid> — what this process is watching
+      (field (trap_exit : boolean))         ;; if true, exit signals become {"EXIT",...} messages
 
       (constructor ((pid : Pid) (task_ : any) (mailbox_limit : any))
         (set! (. this pid) pid)
@@ -22,6 +27,11 @@
         (set! (. this status) "runnable")
         (set! (. this coroutine) undefined)
         (set! (. this pending_receive) null)
+        (set! (. this pending_yield_result) undefined)
+        (set! (. this links) (new Set))
+        (set! (. this monitors_by) (array))
+        (set! (. this monitors) (new Map))
+        (set! (. this trap_exit) false)
       )
 
       (method send ((event : any)) (returns void)

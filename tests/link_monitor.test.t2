@@ -1,0 +1,530 @@
+(program
+  (import { describe it } "vitest")
+  (import { asrt asrtDeep } "./asrt")
+  (import { init_runtime run spawn send link monitor cancel_monitor } "./runtime")
+
+  (describe "Link / Monitor — Phase 1 & 2"
+    (lambda ()
+
+      ;; ─── Phase 1: in-actor yield primitives ────────────────────────────
+
+      ;; 1.1 Link: B crashes, A is killed too
+      (it "link: B crashes, A (linked) is killed" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+
+        (set! a_pid (spawn
+          (generator-fn ()
+            (yield (object (type "link") (target b_pid)))
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (set! b_pid (spawn
+          (generator-fn ()
+            (throw (new Error "B boom")))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (tasks) (method-call (. globalThis __t2agc__) "listTasks"))
+        (let (a_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) a_pid)))))
+        (let (b_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) b_pid)))))
+        (asrt (. b_info status) "dead")
+        (asrt (. a_info status) "dead")
+      ))
+
+      ;; 1.2 Link: B exits normally, A (linked) is killed
+      (it "link: B exits normally, A is killed (no trap_exit)" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+
+        (set! a_pid (spawn
+          (generator-fn ()
+            (yield (object (type "link") (target b_pid)))
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (set! b_pid (spawn
+          (generator-fn ()
+            undefined) ;; finishes immediately
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (tasks) (method-call (. globalThis __t2agc__) "listTasks"))
+        (let (a_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) a_pid)))))
+        (asrt (. a_info status) "dead")
+      ))
+
+      ;; 1.3 Link: A crashes, B (linked by B) is killed too
+      (it "link: A crashes, B (linked) is killed" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+
+        (set! b_pid (spawn
+          (generator-fn ()
+            (yield (object (type "link") (target a_pid)))
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (set! a_pid (spawn
+          (generator-fn ()
+            (throw (new Error "A boom")))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (tasks) (method-call (. globalThis __t2agc__) "listTasks"))
+        (let (b_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) b_pid)))))
+        (asrt (. b_info status) "dead")
+      ))
+
+      ;; 1.4 Link to nonexistent pid returns false
+      (it "link: targeting nonexistent pid returns false" (lambda ()
+        (init_runtime)
+        (let (result_box) (object (val null)))
+
+        (spawn
+          (generator-fn ()
+            (let (ok) (yield (object (type "link") (target 9999))))
+            (set! (. result_box val) ok))
+          (array) "normal" (new Set))
+
+        (run)
+        (asrt (. result_box val) false)
+      ))
+
+      ;; 1.5 Monitor: B crashes, A receives DOWN message
+      (it "monitor: B crashes, A receives DOWN" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+        (let (got_box) (object (msg null)))
+
+        (set! b_pid (spawn
+          (generator-fn ()
+            (throw (new Error "B crash")))
+          (array) "normal" (new Set)))
+
+        (set! a_pid (spawn
+          (generator-fn ()
+            (let (ref) (yield (object (type "monitor") (target b_pid))))
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (set! (. got_box msg) msg))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (msg) (. got_box msg))
+        (asrt (!== msg null) true)
+        (asrt (index msg 0) "DOWN")
+        (asrt (index msg 2) b_pid)
+      ))
+
+      ;; 1.6 Monitor: B exits normally, A receives DOWN with reason "normal"
+      ;; A must be spawned first so it runs before B, establishing the monitor while B is still alive.
+      (it "monitor: B exits normally, A receives DOWN with reason normal" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+        (let (got_box) (object (msg null)))
+
+        ;; Spawn A first — A runs before B and establishes the monitor while B is alive
+        (set! a_pid (spawn
+          (generator-fn ()
+            (let (ref) (yield (object (type "monitor") (target b_pid))))
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (set! (. got_box msg) msg))
+          (array) "normal" (new Set)))
+
+        (set! b_pid (spawn
+          (generator-fn () undefined)
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (msg) (. got_box msg))
+        (asrt (index msg 0) "DOWN")
+        (asrt (index msg 3) "normal")
+      ))
+
+      ;; 1.7 Cancel monitoring: no DOWN after cancel
+      (it "cancel_monitor: A cancels, B crashes, A receives no DOWN" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+
+        ;; B waits, will be triggered after A cancels the monitor
+        (set! b_pid (spawn
+          (generator-fn ()
+            (yield (object (type "receive") (patterns null)))
+            (throw (new Error "B crash")))
+          (array) "normal" (new Set)))
+
+        ;; A monitors B, cancels, then triggers B to crash, then waits
+        (set! a_pid (spawn
+          (generator-fn ()
+            (let (ref) (yield (object (type "monitor") (target b_pid))))
+            (yield (object (type "cancel_monitor") (ref ref)))
+            ;; Trigger B to crash
+            (send b_pid (array "go"))
+            ;; Wait — but we should NOT receive a DOWN message
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        ;; A is suspended (no message arrived) — mailbox is empty
+        (let (a_mailbox) (method-call (. globalThis __t2agc__) "dumpMailbox" a_pid))
+        (asrt (. a_mailbox length) 0)
+      ))
+
+      ;; 1.8 Monitor is unidirectional: B crash does NOT kill A
+      (it "monitor: B crash does not kill A (no link)" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+
+        (set! b_pid (spawn
+          (generator-fn ()
+            (throw (new Error "B crash")))
+          (array) "normal" (new Set)))
+
+        (set! a_pid (spawn
+          (generator-fn ()
+            (let (ref) (yield (object (type "monitor") (target b_pid))))
+            (let (msg) (yield (object (type "receive") (patterns null)))))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (tasks) (method-call (. globalThis __t2agc__) "listTasks"))
+        (let (a_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) a_pid)))))
+        ;; A is suspended (waiting for more messages), NOT crashed
+        (asrt (!== (. a_info status) "crashed") true)
+      ))
+
+      ;; 1.9 trap_exit: exit signal converted to mailbox message
+      ;; B waits for a trigger so A can set trap_exit + link before B crashes.
+      (it "trap_exit=true: B crashes, A receives EXIT message and survives" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+        (let (got_box) (object (msg null)))
+
+        ;; B waits for a "go" message before crashing
+        (set! b_pid (spawn
+          (generator-fn ()
+            (yield (object (type "receive") (patterns null)))
+            (throw (new Error "B crash")))
+          (array) "normal" (new Set)))
+
+        ;; A sets trap_exit, links to B, triggers B, then receives the EXIT signal
+        (set! a_pid (spawn
+          (generator-fn ()
+            (yield (object (type "trap_exit") (value true)))
+            (yield (object (type "link") (target b_pid)))
+            (send b_pid (array "go"))
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (set! (. got_box msg) msg))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (msg) (. got_box msg))
+        (asrt (!== msg null) true)
+        (asrt (index msg 0) "EXIT")
+        (asrt (index msg 1) b_pid)
+        ;; A finished normally — status is dead (done), not crashed
+        (let (tasks) (method-call (. globalThis __t2agc__) "listTasks"))
+        (let (a_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) a_pid)))))
+        (asrt (. a_info status) "dead")
+      ))
+
+      ;; 1.10 trap_exit=false (default): link signal kills A directly
+      ;; B waits so A can link before B crashes.
+      (it "trap_exit=false (default): link signal kills A, no EXIT message" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+
+        ;; B waits for trigger before crashing
+        (set! b_pid (spawn
+          (generator-fn ()
+            (yield (object (type "receive") (patterns null)))
+            (throw (new Error "B crash")))
+          (array) "normal" (new Set)))
+
+        ;; A links to B, triggers B, then waits (will be killed by crash propagation)
+        (set! a_pid (spawn
+          (generator-fn ()
+            (yield (object (type "link") (target b_pid)))
+            (send b_pid (array "go"))
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (tasks) (method-call (. globalThis __t2agc__) "listTasks"))
+        (let (a_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) a_pid)))))
+        (asrt (. a_info status) "dead")
+        ;; No EXIT message delivered — A was killed directly (trap_exit=false)
+        (let (a_mailbox) (method-call (. globalThis __t2agc__) "dumpMailbox" a_pid))
+        (asrt (. a_mailbox length) 0)
+      ))
+
+      ;; 1.11 Multiple links: cascade — C crashes, B dies, A dies
+      (it "link cascade: C crashes, B and A both die" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+        (let (c_pid) 0)
+
+        (set! a_pid (spawn
+          (generator-fn ()
+            (yield (object (type "link") (target b_pid)))
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (set! b_pid (spawn
+          (generator-fn ()
+            (yield (object (type "link") (target a_pid)))
+            (yield (object (type "link") (target c_pid)))
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (set! c_pid (spawn
+          (generator-fn ()
+            (yield (object (type "link") (target b_pid)))
+            (throw (new Error "C crash")))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (tasks) (method-call (. globalThis __t2agc__) "listTasks"))
+        (let (a_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) a_pid)))))
+        (let (b_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) b_pid)))))
+        (let (c_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) c_pid)))))
+        (asrt (. c_info status) "dead")
+        (asrt (. b_info status) "dead")
+        (asrt (. a_info status) "dead")
+      ))
+
+      ;; 1.12 Multiple monitors: two watchers both get DOWN
+      (it "monitor: two watchers both get DOWN when target crashes" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+        (let (c_pid) 0)
+        (let (a_got) (object (msg null)))
+        (let (c_got) (object (msg null)))
+
+        (set! b_pid (spawn
+          (generator-fn ()
+            (throw (new Error "B crash")))
+          (array) "normal" (new Set)))
+
+        (set! a_pid (spawn
+          (generator-fn ()
+            (let (ref) (yield (object (type "monitor") (target b_pid))))
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (set! (. a_got msg) msg))
+          (array) "normal" (new Set)))
+
+        (set! c_pid (spawn
+          (generator-fn ()
+            (let (ref) (yield (object (type "monitor") (target b_pid))))
+            (let (msg) (yield (object (type "receive") (patterns null))))
+            (set! (. c_got msg) msg))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (asrt (index (. a_got msg) 0) "DOWN")
+        (asrt (index (. c_got msg) 0) "DOWN")
+        ;; Each watcher gets its own distinct ref
+        (asrt (!== (index (. a_got msg) 1) (index (. c_got msg) 1)) true)
+      ))
+
+      ;; 1.13 Link + monitor + trap_exit: A receives both EXIT and DOWN
+      ;; B waits so A can set trap_exit, link, and monitor before B crashes.
+      (it "link+monitor+trap_exit: A receives EXIT and DOWN from same B" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+        (let (msgs) (array))
+
+        ;; B waits for trigger before crashing
+        (set! b_pid (spawn
+          (generator-fn ()
+            (yield (object (type "receive") (patterns null)))
+            (throw (new Error "B crash")))
+          (array) "normal" (new Set)))
+
+        ;; A sets up trap_exit, link, monitor, then triggers B, then collects both signals
+        (set! a_pid (spawn
+          (generator-fn ()
+            (yield (object (type "trap_exit") (value true)))
+            (yield (object (type "link") (target b_pid)))
+            (let (ref) (yield (object (type "monitor") (target b_pid))))
+            (send b_pid (array "go"))
+            (let (msg1) (yield (object (type "receive") (patterns null))))
+            (method-call msgs "push" msg1)
+            (let (msg2) (yield (object (type "receive") (patterns null))))
+            (method-call msgs "push" msg2))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (asrt (. msgs length) 2)
+        (let (tags) (method-call msgs "map" (lambda ((m : any)) (return (index m 0)))))
+        (asrt (method-call tags "includes" "EXIT") true)
+        (asrt (method-call tags "includes" "DOWN") true)
+      ))
+
+      ;; exit_signal logged in execution log
+      ;; B waits so A can link before B crashes.
+      (it "exit_signal event appears in log when link kill occurs" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+
+        (set! b_pid (spawn
+          (generator-fn ()
+            (yield (object (type "receive") (patterns null)))
+            (throw (new Error "B crash")))
+          (array) "normal" (new Set)))
+
+        (set! a_pid (spawn
+          (generator-fn ()
+            (yield (object (type "link") (target b_pid)))
+            (send b_pid (array "go"))
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        (let (events) (method-call (. globalThis __t2agc__) "getLog"))
+        (let (sig_events) (method-call events "filter"
+          (lambda ((e : any)) (return (=== (. e kind) "exit_signal")))))
+        (asrt (>= (. sig_events length) 1) true)
+        (let (kill_ev) (method-call sig_events "find"
+          (lambda ((e : any)) (return (=== (. e action) "killed")))))
+        (asrt (!== kill_ev undefined) true)
+        (asrt (. kill_ev to_pid) a_pid)
+      ))
+
+      ;; __t2agc__.listMonitors
+      (it "__t2agc__.listMonitors returns active monitor entries" (lambda ()
+        (init_runtime)
+        (let (a_pid) 0)
+        (let (b_pid) 0)
+
+        ;; B waits forever so it stays alive while A monitors it
+        (set! b_pid (spawn
+          (generator-fn ()
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (set! a_pid (spawn
+          (generator-fn ()
+            (let (ref) (yield (object (type "monitor") (target b_pid))))
+            (yield (object (type "receive") (patterns null))))
+          (array) "normal" (new Set)))
+
+        (run)
+
+        ;; Both A and B are suspended — A has established a monitor on B
+        (let (monitors) (method-call (. globalThis __t2agc__) "listMonitors" b_pid))
+        (asrt (. monitors length) 1)
+        (asrt (. (index monitors 0) watcher_pid) a_pid)
+      ))
+
+      ;; ─── Phase 2: external link / monitor API ──────────────────────────
+
+      ;; 2.1 External link before run: B crashes, A dies
+      (it "external link(): B crashes, A dies" (lambda ()
+        (init_runtime)
+        (let (a_pid)
+          (spawn
+            (generator-fn ()
+              (yield (object (type "receive") (patterns null))))
+            (array) "normal" (new Set)))
+        (let (b_pid)
+          (spawn
+            (generator-fn ()
+              (throw (new Error "B crash")))
+            (array) "normal" (new Set)))
+
+        (link a_pid b_pid)
+        (run)
+
+        (let (tasks) (method-call (. globalThis __t2agc__) "listTasks"))
+        (let (a_info) (method-call tasks "find" (lambda ((t : any)) (return (=== (. t pid) a_pid)))))
+        (asrt (. a_info status) "dead")
+      ))
+
+      ;; 2.2 External monitor before run: B finishes, A receives DOWN
+      (it "external monitor(): B exits normally, A receives DOWN" (lambda ()
+        (init_runtime)
+        (let (got_box) (object (msg null)))
+        (let (a_pid)
+          (spawn
+            (generator-fn ()
+              (let (msg) (yield (object (type "receive") (patterns null))))
+              (set! (. got_box msg) msg))
+            (array) "normal" (new Set)))
+        (let (b_pid)
+          (spawn
+            (generator-fn () undefined)
+            (array) "normal" (new Set)))
+
+        (monitor a_pid b_pid)
+        (run)
+
+        (let (msg) (. got_box msg))
+        (asrt (!== msg null) true)
+        (asrt (index msg 0) "DOWN")
+        (asrt (index msg 3) "normal")
+      ))
+
+      ;; 2.3 External cancel_monitor: B crashes, A gets no DOWN
+      (it "external cancel_monitor(): A cancels before B crashes, no DOWN" (lambda ()
+        (init_runtime)
+        (let (a_pid)
+          (spawn
+            (generator-fn ()
+              (yield (object (type "receive") (patterns null))))
+            (array) "normal" (new Set)))
+        (let (b_pid)
+          (spawn
+            (generator-fn ()
+              (throw (new Error "B crash")))
+            (array) "normal" (new Set)))
+
+        (let (ref) (monitor a_pid b_pid))
+        (cancel_monitor a_pid ref)
+        (run)
+
+        (let (a_mailbox) (method-call (. globalThis __t2agc__) "dumpMailbox" a_pid))
+        (asrt (. a_mailbox length) 0)
+      ))
+
+      ;; 2.4 External link returns false for nonexistent pid
+      (it "external link(): returns false when pid does not exist" (lambda ()
+        (init_runtime)
+        (let (a_pid)
+          (spawn
+            (generator-fn () undefined)
+            (array) "normal" (new Set)))
+
+        (let (result) (link a_pid 9999))
+        (asrt result false)
+      ))
+
+    )
+  )
+)
