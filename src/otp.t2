@@ -5,6 +5,7 @@
   (import { ExecutionContext } "./execution_context")
   (import { Scheduler } "./scheduler")
   (import { Task } "./task")
+  (import { ExecutionLog } "./execution_log")
 
   (export (class OTP
     (class-body
@@ -12,12 +13,16 @@
       (field (context : ExecutionContext))
       (field (scheduler : Scheduler))
       (field (next_pid : Pid))
+      (field (log : ExecutionLog))
 
       (constructor ()
         (set! (. this registry) (new ProcessRegistry))
         (set! (. this context) (new ExecutionContext))
         (set! (. this scheduler) (new Scheduler (. this registry) (. this context)))
         (set! (. this next_pid) 1)
+        (set! (. this log) (new ExecutionLog 1024))
+        ;; Give the scheduler access to the log for crash/done events
+        (set! (. (. this scheduler) log) (. this log))
       )
 
       (method spawn ((task_ : Task) (mailbox_limit : any)) (returns Pid)
@@ -28,6 +33,11 @@
         (method-call (. this registry) "register" process)
         (method-call (. (. this scheduler) tasks) "set" pid task_)
         (method-call (. this scheduler) "schedule" process)
+
+        ;; Log spawn event
+        (method-call (. this log) "log" (object
+          (kind "spawn") (pid pid) (priority (. task_ priority))
+          (time (method-call Date "now"))))
 
         (return pid)
       )
@@ -46,6 +56,11 @@
         (if was_suspended
           (then (method-call (. this scheduler) "schedule" process))
         )
+
+        ;; Log send event
+        (method-call (. this log) "log" (object
+          (kind "send") (to pid) (time (method-call Date "now"))))
+
         (return true)
       )
 
@@ -64,7 +79,7 @@
       (method stop () (returns void)
         (method-call (. this scheduler) "stop")
       )
-      
+
       (method step () (returns boolean)
         (return (method-call (. this scheduler) "run_next"))
       )

@@ -1,13 +1,65 @@
 (program
   (import { Pid } "./types")
   (import { Scheduler } "./scheduler")
-
   (import { OTP } "./otp")
 
   (let (global_otp : (union OTP undefined)) undefined)
 
   (export (fn init_runtime () : void
     (set! global_otp (new OTP))
+
+    ;; Install __t2agc__ global inspector (DESIGN.md §9)
+    (set! (. globalThis __t2agc__) (object
+      (listTasks (lambda ()
+        (if (=== global_otp undefined) (then (return (array))))
+        (let (tasks : (type-array any)) (array))
+        (let (all_procs) (method-call (. (. global_otp registry) processes) "values"))
+        (for-of p all_procs
+          (method-call tasks "push" (object
+            (pid (. p pid))
+            (status (. p status))
+            (priority (. (. p task_) priority))
+            (mailbox_size (method-call (. p mailbox) "size"))
+          ))
+        )
+        (return tasks)
+      ))
+
+      (dumpMailbox (lambda ((pid : Pid))
+        (if (=== global_otp undefined) (then (return undefined)))
+        (let (proc) (method-call (. global_otp registry) "get" pid))
+        (if (=== proc undefined) (then (return undefined)))
+        ;; Read mailbox contents without modifying
+        (let (buf) (. (. proc mailbox) buffer))
+        (let (result : (type-array any)) (array))
+        (let (size) (method-call buf "size"))
+        (let (i) 0)
+        (while (< i size)
+          (let (idx) (% (+ (. buf head) i) (. buf capacity)))
+          (method-call result "push" (index (. buf buffer) idx))
+          (set! i (+ i 1))
+        )
+        (return result)
+      ))
+
+      (getLog (lambda ()
+        (if (=== global_otp undefined) (then (return (array))))
+        (return (method-call (. global_otp log) "get_events"))
+      ))
+
+      (getAGCEvents (lambda ()
+        (if (=== global_otp undefined) (then (return (array))))
+        (return (method-call (. global_otp log) "get_agc_events"))
+      ))
+
+      (getSchedulerState (lambda ()
+        (if (=== global_otp undefined) (then (return undefined)))
+        (return (object
+          (running (. (. global_otp scheduler) running))
+          (run_queue_length (. (. (. global_otp scheduler) run_queue) length))
+        ))
+      ))
+    ))
   ))
 
   (export (fn get_global_scheduler () : (union Scheduler undefined)
@@ -15,6 +67,10 @@
       (then (return undefined))
     )
     (return (. global_otp scheduler))
+  ))
+
+  (export (fn get_global_otp () : (union OTP undefined)
+    (return global_otp)
   ))
 
   (export (fn spawn ((fn_ : any) (args : (type-array any)) (priority : string) (caps : any) (mailbox_limit : any)) : Pid

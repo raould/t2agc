@@ -68,6 +68,7 @@
       (field (run_queue : (type-array Process)))
       (field (running : boolean))
       (field (tasks : any))
+      (field (log : any))
 
       (constructor ((registry : ProcessRegistry) (context : ExecutionContext))
         (set! (. this registry) registry)
@@ -75,6 +76,7 @@
         (set! (. this run_queue) (array))
         (set! (. this running) false)
         (set! (. this tasks) (new Map))
+        (set! (. this log) null)
       )
 
       (method schedule ((process : Process)) (returns void)
@@ -139,6 +141,17 @@
             (set! (. process status) "dead")
             (set! (. (. process task_) status) "crashed")
             (set! (. (. process task_) crash_reason) crash_reason)
+            ;; Log crash event
+            (if (!== (. this log) null)
+              (then
+                (method-call (. this log) "log" (object
+                  (kind "crash") (pid (. process pid)) (reason crash_reason)
+                  (time (method-call Date "now"))))
+                (method-call (. this log) "log_agc" (object
+                  (code "AGC-P999") (severity "error")
+                  (timestamp (method-call Date "now"))
+                  (pid (. process pid))
+                  (detail (+ "Process crashed: " (+ "" crash_reason)))))))
             (method-call (. this context) "clear_current")
             (return true)
           )
@@ -150,6 +163,12 @@
           (then
             (set! (. process status) "dead")
             (set! (. (. process task_) status) "done")
+            ;; Log done event
+            (if (!== (. this log) null)
+              (then
+                (method-call (. this log) "log" (object
+                  (kind "done") (pid (. process pid))
+                  (time (method-call Date "now"))))))
           )
           (else
             ;; Process yielded a primitive — capture pending_receive patterns

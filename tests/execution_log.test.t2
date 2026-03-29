@@ -1,0 +1,83 @@
+(program
+  (import { describe it } "vitest")
+  (import { asrt } "./asrt")
+  (import { init_runtime run spawn send get_global_otp } "./runtime")
+
+  (describe "Execution Log and __t2agc__ inspector"
+    (lambda ()
+
+      (it "logs spawn events" (lambda ()
+        (init_runtime)
+        (spawn (generator-fn () undefined) (array) "normal" (new Set) undefined)
+        (spawn (generator-fn () undefined) (array) "high" (new Set) undefined)
+        (run)
+        (let (otp) (get_global_otp))
+        (let (events) (method-call (. otp log) "get_events"))
+        ;; Should have at least 2 spawn events + 2 done events
+        (asrt (>= (. events length) 4) true)
+        ;; First event should be a spawn
+        (asrt (. (index events 0) kind) "spawn")))
+
+      (it "logs done events when actors finish" (lambda ()
+        (init_runtime)
+        (spawn (generator-fn () undefined) (array) "normal" (new Set) undefined)
+        (run)
+        (let (otp) (get_global_otp))
+        (let (events) (method-call (. otp log) "get_events"))
+        ;; Find done event
+        (let (done_events) (method-call events "filter"
+          (lambda ((e : any)) (return (=== (. e kind) "done")))))
+        (asrt (>= (. done_events length) 1) true)))
+
+      (it "logs crash events with AGC code" (lambda ()
+        (init_runtime)
+        (spawn (generator-fn ()
+          (throw (new Error "test crash")))
+          (array) "normal" (new Set) undefined)
+        (run)
+        (let (otp) (get_global_otp))
+        ;; Check execution log for crash event
+        (let (events) (method-call (. otp log) "get_events"))
+        (let (crash_events) (method-call events "filter"
+          (lambda ((e : any)) (return (=== (. e kind) "crash")))))
+        (asrt (. crash_events length) 1)
+        ;; Check AGC events for AGC-P999
+        (let (agc_events) (method-call (. otp log) "get_agc_events"))
+        (asrt (>= (. agc_events length) 1) true)
+        (asrt (. (index agc_events 0) code) "AGC-P999")))
+
+      (it "logs send events" (lambda ()
+        (init_runtime)
+        (let (pid) (spawn
+          (generator-fn ()
+            (let (msg) (yield (object (type "receive") (patterns null)))))
+          (array) "normal" (new Set) undefined))
+        (send pid (array "hello"))
+        (run)
+        (let (otp) (get_global_otp))
+        (let (events) (method-call (. otp log) "get_events"))
+        (let (send_events) (method-call events "filter"
+          (lambda ((e : any)) (return (=== (. e kind) "send")))))
+        (asrt (>= (. send_events length) 1) true)
+        (asrt (. (index send_events 0) to) pid)))
+
+      (it "__t2agc__.listTasks returns task info" (lambda ()
+        (init_runtime)
+        (spawn (generator-fn () undefined) (array) "normal" (new Set) undefined)
+        (let (tasks) (method-call (. globalThis __t2agc__) "listTasks"))
+        (asrt (. tasks length) 1)
+        (asrt (. (index tasks 0) priority) "normal")
+        (asrt (=== (. (index tasks 0) pid) undefined) false)))
+
+      (it "__t2agc__.getLog returns log events" (lambda ()
+        (init_runtime)
+        (spawn (generator-fn () undefined) (array) "normal" (new Set) undefined)
+        (run)
+        (let (log) (method-call (. globalThis __t2agc__) "getLog"))
+        (asrt (>= (. log length) 1) true)))
+
+      (it "__t2agc__.getSchedulerState returns state" (lambda ()
+        (init_runtime)
+        (let (state) (method-call (. globalThis __t2agc__) "getSchedulerState"))
+        (asrt (!== state undefined) true)
+        (asrt (=== (. state running) false) true))))))

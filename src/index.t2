@@ -7,6 +7,7 @@
   (export-all-from "./process")
   (export-all-from "./process_registry")
   (export-all-from "./execution_context")
+  (export-all-from "./execution_log")
   (export-all-from "./match_pattern")
   (export-all-from "./scheduler")
   (export-all-from "./otp")
