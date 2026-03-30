@@ -143,4 +143,9 @@
     (if (=== global_otp undefined) (then (return false)))
     (return (method-call global_otp "cancel_monitor" watcher_pid ref))
   ))
+
+  (export (fn kill ((pid : Pid) (reason : any)) : void
+    (if (=== global_otp undefined) (then (return undefined)))
+    (method-call global_otp "kill" pid reason)
+  ))
 )

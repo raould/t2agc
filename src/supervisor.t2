@@ -1,0 +1,275 @@
+(program
+  (import { spawn send self get_global_otp kill } "./runtime")
+
+  ;; make_supervisor(spec) — returns a generator function suitable for spawn().
+  ;;
+  ;; spec = {
+  ;;   strategy:     "one_for_one" | "one_for_all" | "rest_for_one"
+  ;;   max_restarts: number  (default 3)
+  ;;   max_seconds:  number  (default 5)
+  ;;   children:     ChildSpec[]
+  ;; }
+  ;;
+  ;; ChildSpec = { id, fn, args, priority, restart, type }
+  ;;   restart: "permanent" | "transient" | "temporary"
+  ;;   type:    "worker" | "supervisor"
+  ;;
+  (export (fn make_supervisor ((spec : any)) : any
+    (return (generator-fn ()
+      ;; Set trap_exit so EXIT signals become mailbox messages instead of killing us
+      (yield (object (type "trap_exit") (value true)))
+
+      ;; Runtime state — mutable, persisted across yields as generator locals
+      (let (child_pids) (new Map))    ;; id → current pid
+      (let (pid_to_id) (new Map))     ;; pid → id (reverse lookup for EXIT handling)
+      (let (restart_log) (array))     ;; timestamps of restarts within the sliding window
+      (let (pending_kills) (new Set)) ;; pids intentionally killed; ignore their EXIT signals
+
+      ;; Spawn all children and link to each
+      (let (init_i) 0)
+      (while (< init_i (. (. spec children) length))
+        (let (init_child) (index (. spec children) init_i))
+        (let (init_pid) (spawn (. init_child fn) (. init_child args) (. init_child priority) (new Set)))
+        (method-call child_pids "set" (. init_child id) init_pid)
+        (method-call pid_to_id "set" init_pid (. init_child id))
+        (yield (object (type "link") (target init_pid)))
+        (set! init_i (+ init_i 1))
+      )
+
+      ;; Log supervisor_start
+      (let (otp) (get_global_otp))
+      (if (!== otp undefined)
+        (then
+          (method-call (. otp log) "log" (object
+            (kind "supervisor_start") (supervisor_pid (self))
+            (strategy (. spec strategy))
+            (max_restarts (|| (. spec max_restarts) 3))
+            (max_seconds (|| (. spec max_seconds) 5))
+            (time (method-call Date "now"))))))
+
+      ;; Supervision loop — runs until restart limit exceeded (which throws "shutdown")
+      (while true
+        (let (msg) (yield (object (type "receive") (patterns null))))
+
+        ;; ── Handle EXIT signal from a linked process ──────────────────────
+        (if (=== (index msg 0) "EXIT")
+          (then
+            (let (from_pid) (index msg 1))
+            (let (reason) (index msg 2))
+
+            (if (method-call pending_kills "has" from_pid)
+              (then
+                ;; Intentional kill during restart strategy — ignore
+                (method-call pending_kills "delete" from_pid)
+              )
+              (else
+                (let (child_id) (method-call pid_to_id "get" from_pid))
+                (method-call pid_to_id "delete" from_pid)
+
+                (if (!== child_id undefined)
+                  (then
+                    (let (child_spec) (method-call (. spec children) "find"
+                      (lambda ((c : any)) (return (=== (. c id) child_id)))))
+
+                    ;; Decide whether to restart based on restart policy
+                    (let (should_restart) false)
+                    (if (=== (. child_spec restart) "permanent")
+                      (then (set! should_restart true)))
+                    (if (&& (=== (. child_spec restart) "transient") (!== reason "normal"))
+                      (then (set! should_restart true)))
+
+                    (if should_restart
+                      (then
+                        ;; Update restart frequency window
+                        (let (now_ts) (method-call Date "now"))
+                        (let (max_r) (|| (. spec max_restarts) 3))
+                        (let (max_s) (|| (. spec max_seconds) 5))
+                        (let (window_ms) (* max_s 1000))
+                        (set! restart_log
+                          (method-call restart_log "filter"
+                            (lambda ((t : any)) (return (> t (- now_ts window_ms))))))
+                        (method-call restart_log "push" now_ts)
+
+                        (if (> (. restart_log length) max_r)
+                          (then
+                            ;; Restart limit exceeded
+                            (let (otp_p10) (get_global_otp))
+                            (if (!== otp_p10 undefined)
+                              (then
+                                (method-call (. otp_p10 log) "log" (object
+                                  (kind "supervisor_shutdown") (supervisor_pid (self))
+                                  (reason "restart_limit_exceeded")
+                                  (restart_count (. restart_log length))
+                                  (max_restarts max_r)
+                                  (time (method-call Date "now"))))
+                                (method-call (. otp_p10 log) "log_agc" (object
+                                  (code "AGC-P010") (severity "error")
+                                  (timestamp (method-call Date "now"))
+                                  (pid (self))
+                                  (detail "Restart limit exceeded")))))
+                            (throw "shutdown")
+                          )
+                          (else
+                            ;; Log restart event
+                            (let (otp_p02) (get_global_otp))
+                            (if (!== otp_p02 undefined)
+                              (then
+                                (method-call (. otp_p02 log) "log_agc" (object
+                                  (code "AGC-P002") (severity "warn")
+                                  (timestamp (method-call Date "now"))
+                                  (pid (self))
+                                  (detail (+ (+ child_id " restart ") (+ "" (. restart_log length))))))))
+
+                            ;; ── one_for_one ──────────────────────────────
+                            (if (=== (. spec strategy) "one_for_one")
+                              (then
+                                (let (new_pid1) (spawn (. child_spec fn) (. child_spec args) (. child_spec priority) (new Set)))
+                                (method-call child_pids "set" child_id new_pid1)
+                                (method-call pid_to_id "set" new_pid1 child_id)
+                                (yield (object (type "link") (target new_pid1)))
+                              )
+                            )
+
+                            ;; ── one_for_all ──────────────────────────────
+                            (if (=== (. spec strategy) "one_for_all")
+                              (then
+                                ;; Collect which children are being killed (for cascade log)
+                                (let (cascade_ids) (array))
+                                ;; Kill all alive children other than the already-dead crashed one
+                                (let (ofa_i) 0)
+                                (while (< ofa_i (. (. spec children) length))
+                                  (let (ofa_c) (index (. spec children) ofa_i))
+                                  (if (!== (. ofa_c id) child_id)
+                                    (then
+                                      (let (ofa_pid) (method-call child_pids "get" (. ofa_c id)))
+                                      (if (!== ofa_pid undefined)
+                                        (then
+                                          (method-call pending_kills "add" ofa_pid)
+                                          (method-call cascade_ids "push" (. ofa_c id))
+                                          (kill ofa_pid "killed")
+                                          (method-call pid_to_id "delete" ofa_pid)
+                                        )
+                                      )
+                                    )
+                                  )
+                                  (set! ofa_i (+ ofa_i 1))
+                                )
+                                ;; Log cascade event
+                                (let (otp_ofa) (get_global_otp))
+                                (if (!== otp_ofa undefined)
+                                  (then
+                                    (method-call (. otp_ofa log) "log" (object
+                                      (kind "strategy_cascade") (supervisor_pid (self))
+                                      (strategy "one_for_all") (trigger_child_id child_id)
+                                      (affected_child_ids cascade_ids)
+                                      (time (method-call Date "now"))))))
+                                ;; Restart all children
+                                (let (ofa_r) 0)
+                                (while (< ofa_r (. (. spec children) length))
+                                  (let (ofa_rc) (index (. spec children) ofa_r))
+                                  (let (ofa_new) (spawn (. ofa_rc fn) (. ofa_rc args) (. ofa_rc priority) (new Set)))
+                                  (method-call child_pids "set" (. ofa_rc id) ofa_new)
+                                  (method-call pid_to_id "set" ofa_new (. ofa_rc id))
+                                  (yield (object (type "link") (target ofa_new)))
+                                  (set! ofa_r (+ ofa_r 1))
+                                )
+                              )
+                            )
+
+                            ;; ── rest_for_one ─────────────────────────────
+                            (if (=== (. spec strategy) "rest_for_one")
+                              (then
+                                ;; Find the index of the crashed child
+                                (let (rfo_idx) -1)
+                                (let (rfo_fi) 0)
+                                (while (< rfo_fi (. (. spec children) length))
+                                  (if (=== (. (index (. spec children) rfo_fi) id) child_id)
+                                    (then (set! rfo_idx rfo_fi)))
+                                  (set! rfo_fi (+ rfo_fi 1))
+                                )
+                                ;; Kill all children after the crashed one
+                                (let (rfo_cascade) (array))
+                                (let (rfo_ki) (+ rfo_idx 1))
+                                (while (< rfo_ki (. (. spec children) length))
+                                  (let (rfo_kc) (index (. spec children) rfo_ki))
+                                  (let (rfo_kpid) (method-call child_pids "get" (. rfo_kc id)))
+                                  (if (!== rfo_kpid undefined)
+                                    (then
+                                      (method-call pending_kills "add" rfo_kpid)
+                                      (method-call rfo_cascade "push" (. rfo_kc id))
+                                      (kill rfo_kpid "killed")
+                                      (method-call pid_to_id "delete" rfo_kpid)
+                                    )
+                                  )
+                                  (set! rfo_ki (+ rfo_ki 1))
+                                )
+                                ;; Log cascade event
+                                (let (otp_rfo) (get_global_otp))
+                                (if (!== otp_rfo undefined)
+                                  (then
+                                    (method-call (. otp_rfo log) "log" (object
+                                      (kind "strategy_cascade") (supervisor_pid (self))
+                                      (strategy "rest_for_one") (trigger_child_id child_id)
+                                      (affected_child_ids rfo_cascade)
+                                      (time (method-call Date "now"))))))
+                                ;; Restart crashed child and all after it
+                                (let (rfo_ri) rfo_idx)
+                                (while (< rfo_ri (. (. spec children) length))
+                                  (let (rfo_rc) (index (. spec children) rfo_ri))
+                                  (let (rfo_new) (spawn (. rfo_rc fn) (. rfo_rc args) (. rfo_rc priority) (new Set)))
+                                  (method-call child_pids "set" (. rfo_rc id) rfo_new)
+                                  (method-call pid_to_id "set" rfo_new (. rfo_rc id))
+                                  (yield (object (type "link") (target rfo_new)))
+                                  (set! rfo_ri (+ rfo_ri 1))
+                                )
+                              )
+                            )
+                          )
+                        )
+                      )
+                      (else
+                        ;; No restart — log AGC-P001 and child_stop_no_restart
+                        (let (otp_p01) (get_global_otp))
+                        (if (!== otp_p01 undefined)
+                          (then
+                            (method-call (. otp_p01 log) "log" (object
+                              (kind "child_stop_no_restart") (supervisor_pid (self))
+                              (child_id child_id) (pid from_pid) (reason reason)
+                              (restart_policy (. child_spec restart))
+                              (time (method-call Date "now"))))
+                            (method-call (. otp_p01 log) "log_agc" (object
+                              (code "AGC-P001") (severity "warn")
+                              (timestamp (method-call Date "now"))
+                              (pid (self))
+                              (detail (+ "No restart: " child_id))))))
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+
+        ;; ── Handle which_children query ────────────────────────────────────
+        (if (=== (index msg 0) "which_children")
+          (then
+            (let (reply_to) (index msg 1))
+            (let (wc_list) (array))
+            (let (wc_i) 0)
+            (while (< wc_i (. (. spec children) length))
+              (let (wc_c) (index (. spec children) wc_i))
+              (method-call wc_list "push" (object
+                (id (. wc_c id))
+                (pid (method-call child_pids "get" (. wc_c id)))
+                (restart (. wc_c restart))
+                (type (. wc_c type))))
+              (set! wc_i (+ wc_i 1))
+            )
+            (send reply_to (array "children_reply" wc_list))
+          )
+        )
+      )
+    ))
+  ))
+)

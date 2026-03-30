@@ -121,6 +121,21 @@
         (return ref)
       )
 
+      ;; Force-kill a process: mark dead, propagate exit signals, log crash event.
+      ;; Used by the supervisor when applying one_for_all / rest_for_one restart strategies.
+      (method kill ((pid : Pid) (reason : any)) (returns void)
+        (let (process) (method-call (. this registry) "get" pid))
+        (if (=== process undefined) (then (return)))
+        (if (=== (. process status) "dead") (then (return)))
+        (set! (. process status) "dead")
+        (set! (. (. process task_) status) "crashed")
+        (set! (. (. process task_) crash_reason) reason)
+        (method-call (. this log) "log" (object
+          (kind "crash") (pid pid) (reason reason)
+          (time (method-call Date "now"))))
+        (method-call (. this scheduler) "propagate_exit" process reason)
+      )
+
       ;; External cancel_monitor API (Phase 2)
       (method cancel_monitor ((watcher_pid : Pid) (ref : number)) (returns boolean)
         (let (watcher) (method-call (. this registry) "get" watcher_pid))

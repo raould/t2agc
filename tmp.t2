@@ -1,0 +1,17 @@
+(program
+  (let (shk { rule: (lambda ((args: any)) (console.log args)) }))
+  (shk.rule { name: "build-compiler",
+    output: "stage9/index.ts",
+    deps: [{ kind: "rule", name: "build-grammar" },
+          { kind: "glob", pattern: "stage9/Stage9*.s8" },
+          { kind: "file", path: "stage9/Stage9-tags.ts" }],
+    action: (async-fn ((ctx: any))
+      (const (stage9Dir: string) (path.join ctx.projectRoot "stage9"))
+      (const (files: (type-array string))
+        ((readdirSync stage9Dir).filter (fn ((f: string)) (return (f.endsWith ".s8")))))
+      (for-of f files
+        (const (result: any) (await (ctx.run tsxBin [compilerPath srcPath])))
+        (writeFileSync tmpPath result.stdout)))
+    }
+  )
+)

@@ -19,6 +19,7 @@
     "@types/node": "^25.5.0",
     "rimraf": "^6.1.3",
     "t2lang": "file:../t2lang",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },
